@@ -27,6 +27,9 @@
 #include "lll_adv.h"
 #include "lll_adv_aux.h"
 #include "lll_adv_internal.h"
+#if IS_ENABLED(CONFIG_BT_CTLR_DF_ADV_CTE_TX)
+#include "lll_df_internal.h"
+#endif /* CONFIG_BT_CTLR_DF_ADV_CTE_TX */
 
 #include "ull_adv_types.h"
 
@@ -140,7 +143,8 @@ uint8_t ll_adv_aux_ad_data_set(uint8_t handle, uint8_t op, uint8_t frag_pref, ui
 
 			aux->interval =	adv->interval +
 					(HAL_TICKER_TICKS_TO_US(
-						ULL_ADV_RANDOM_DELAY) / 625U);
+						ULL_ADV_RANDOM_DELAY) /
+						ADV_INT_UNIT_US);
 
 			/* FIXME: Find absolute ticks until after primary PDU
 			 *        on air to place the auxiliary advertising PDU.
@@ -351,8 +355,22 @@ uint8_t ll_adv_aux_set_remove(uint8_t handle)
 		if (sync->is_enabled) {
 			return BT_HCI_ERR_CMD_DISALLOWED;
 		}
+		lll->sync = NULL;
+
+		ull_adv_sync_release(sync);
 	}
 #endif /* CONFIG_BT_CTLR_ADV_PERIODIC */
+
+#if IS_ENABLED(CONFIG_BT_CTLR_DF_ADV_CTE_TX)
+	if (adv->df_cfg) {
+		if (adv->df_cfg->is_enabled) {
+			return BT_HCI_ERR_CMD_DISALLOWED;
+		}
+
+		ull_df_adv_cfg_release(adv->df_cfg);
+		adv->df_cfg = NULL;
+	}
+#endif /* CONFIG_BT_CTLR_DF_ADV_CTE_TX */
 
 	/* Release auxiliary channel set */
 	if (lll->aux) {
@@ -850,7 +868,7 @@ uint32_t ull_adv_aux_start(struct ll_adv_aux_set *aux, uint32_t ticks_anchor,
 			   (TICKER_ID_ADV_AUX_BASE + aux_handle),
 			   ticks_anchor, 0,
 			   HAL_TICKER_US_TO_TICKS((uint64_t)aux->interval *
-						  625),
+						  ADV_INT_UNIT_US),
 			   TICKER_NULL_REMAINDER, TICKER_NULL_LAZY,
 			   (aux->evt.ticks_slot + ticks_slot_overhead),
 			   ticker_cb, aux,

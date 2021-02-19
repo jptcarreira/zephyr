@@ -36,6 +36,8 @@ LOG_MODULE_REGISTER(counter_rtc_stm32, CONFIG_COUNTER_LOG_LEVEL);
 
 #if defined(CONFIG_SOC_SERIES_STM32L4X)
 #define RTC_EXTI_LINE	LL_EXTI_LINE_18
+#elif defined(CONFIG_SOC_SERIES_STM32G0X)
+#define RTC_EXTI_LINE	LL_EXTI_LINE_19
 #elif defined(CONFIG_SOC_SERIES_STM32F4X) \
 	|| defined(CONFIG_SOC_SERIES_STM32F0X) \
 	|| defined(CONFIG_SOC_SERIES_STM32F2X) \
@@ -163,11 +165,13 @@ static int rtc_stm32_set_alarm(const struct device *dev, uint8_t chan_id,
 		 * that tick+1 event occurs before alarm setting is finished.
 		 */
 		ticks += now + 1;
+		alarm_val = (time_t)(counter_ticks_to_us(dev, ticks) / USEC_PER_SEC)
+			+ T_TIME_OFFSET;
+	} else {
+		alarm_val = (time_t)(counter_ticks_to_us(dev, ticks) / USEC_PER_SEC);
 	}
 
 	LOG_DBG("Set Alarm: %d\n", ticks);
-
-	alarm_val = (time_t)(counter_ticks_to_us(dev, ticks) / USEC_PER_SEC);
 
 	gmtime_r(&alarm_val, &alarm_tm);
 
@@ -274,6 +278,8 @@ void rtc_stm32_isr(const struct device *dev)
 
 #if defined(CONFIG_SOC_SERIES_STM32H7X) && defined(CONFIG_CPU_CORTEX_M4)
 	LL_C2_EXTI_ClearFlag_0_31(RTC_EXTI_LINE);
+#elif defined(CONFIG_SOC_SERIES_STM32G0X)
+	LL_EXTI_ClearRisingFlag_0_31(RTC_EXTI_LINE);
 #else
 	LL_EXTI_ClearFlag_0_31(RTC_EXTI_LINE);
 #endif
@@ -282,14 +288,15 @@ void rtc_stm32_isr(const struct device *dev)
 
 static int rtc_stm32_init(const struct device *dev)
 {
-	const struct device *clk = device_get_binding(STM32_CLOCK_CONTROL_NAME);
+	const struct device *clk = DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE);
 	const struct rtc_stm32_config *cfg = DEV_CFG(dev);
-
-	__ASSERT_NO_MSG(clk);
 
 	DEV_DATA(dev)->callback = NULL;
 
-	clock_control_on(clk, (clock_control_subsys_t *) &cfg->pclken);
+	if (clock_control_on(clk, (clock_control_subsys_t *) &cfg->pclken) != 0) {
+		LOG_ERR("clock op failed\n");
+		return -EIO;
+	}
 
 	z_stm32_hsem_lock(CFG_HW_RCC_SEMID, HSEM_LOCK_DEFAULT_RETRY);
 

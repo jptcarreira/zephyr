@@ -5,7 +5,6 @@
 
 '''Runner for flashing with nrfjprog.'''
 
-import os
 import shlex
 import subprocess
 import sys
@@ -197,12 +196,19 @@ class NrfJprogBinaryRunner(ZephyrBinaryRunner):
 
         uicr = uicr_ranges[self.family]
 
-        if not self.force and has_region(uicr, self.hex_):
-            # Hex file has UICR contents.
+        if not self.uicr_data_ok and has_region(uicr, self.hex_):
+            # Hex file has UICR contents, and that's not OK.
             raise RuntimeError(
                 'The hex file contains data placed in the UICR, which '
                 'needs a full erase before reprogramming. Run west '
-                'flash again with --force or --erase.')
+                'flash again with --force, --erase, or --recover.')
+
+    @property
+    def uicr_data_ok(self):
+        # True if it's OK to try to flash even with UICR data
+        # in the image; False otherwise.
+
+        return self.force or self.erase or self.recover
 
     def recover_target(self):
         if self.family == 'NRF53':
@@ -287,11 +293,8 @@ class NrfJprogBinaryRunner(ZephyrBinaryRunner):
     def do_run(self, command, **kwargs):
         self.require('nrfjprog')
         self.build_conf = BuildConfiguration(self.cfg.build_dir)
-        if not os.path.isfile(self.hex_):
-            raise RuntimeError(
-                f'Cannot flash; hex file ({self.hex_}) does not exist. '
-                'Try enabling CONFIG_BUILD_OUTPUT_HEX.')
 
+        self.ensure_output('hex')
         self.ensure_snr()
         self.ensure_family()
         self.check_force_uicr()

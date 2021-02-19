@@ -377,7 +377,7 @@ static int i2c_ctrl_wait_stop_completed(const struct device *dev, int timeout)
 		k_msleep(1);
 	} while (--timeout);
 
-	if (timeout) {
+	if (timeout > 0) {
 		return 0;
 	} else {
 		return -ETIMEDOUT;
@@ -401,7 +401,7 @@ static int i2c_ctrl_wait_idle_completed(const struct device *dev, int timeout)
 		k_msleep(1);
 	} while (--timeout);
 
-	if (timeout) {
+	if (timeout > 0) {
 		return 0;
 	} else {
 		return -ETIMEDOUT;
@@ -414,6 +414,10 @@ static int i2c_ctrl_recovery(const struct device *dev)
 	struct i2c_ctrl_data *const data = DRV_DATA(dev);
 	int ret;
 
+	if (data->oper_state != NPCX_I2C_ERROR_RECOVERY) {
+		data->oper_state = NPCX_I2C_ERROR_RECOVERY;
+	}
+
 	/* Step 1: Make sure the bus is not stalled before exit. */
 	i2c_ctrl_hold_bus(dev, 0);
 
@@ -423,13 +427,12 @@ static int i2c_ctrl_recovery(const struct device *dev)
 	 * - Wait for STOP condition completed
 	 * - Then clear BB (BUS BUSY) bit
 	 */
-	inst_fifo->SMBST |= BIT(NPCX_SMBST_BER) | BIT(NPCX_SMBST_NEGACK);
+	inst_fifo->SMBST = BIT(NPCX_SMBST_BER) | BIT(NPCX_SMBST_NEGACK);
 	ret = i2c_ctrl_wait_stop_completed(dev, I2C_MAX_TIMEOUT);
 	inst_fifo->SMBCST |= BIT(NPCX_SMBCST_BB);
-	if (!ret) {
+	if (ret != 0) {
 		LOG_ERR("Abort i2c port%02x fail! Bus might be stalled.",
 								data->port);
-		return -EIO;
 	}
 
 	/*
@@ -440,7 +443,7 @@ static int i2c_ctrl_recovery(const struct device *dev)
 	 */
 	inst_fifo->SMBCTL2 &= ~BIT(NPCX_SMBCTL2_ENABLE);
 	ret = i2c_ctrl_wait_idle_completed(dev, I2C_MAX_TIMEOUT);
-	if (!ret) {
+	if (ret != 0) {
 		LOG_ERR("Reset i2c port%02x fail! Bus might be stalled.",
 								data->port);
 		return -EIO;
@@ -553,19 +556,31 @@ static void i2c_ctrl_handle_read_int_event(const struct device *dev)
 		size_t rx_occupied = i2c_ctrl_fifo_rx_occupied(dev);
 
 		LOG_DBG("rx remains %d, occupied %d", rx_remain, rx_occupied);
-		/*
-		 * Hold SCL line before reading data bytes from FIFO. Or the
-		 * hardware will release bus immediately before the driver
-		 * handles incoming data.
-		 */
-		i2c_ctrl_hold_bus(dev, 1);
+
+		/* Is it the last read transaction with STOP condition? */
+		if (rx_occupied >= rx_remain &&
+			(data->msg->flags & I2C_MSG_STOP) != 0) {
+			/*
+			 * Generate a STOP condition before reading data bytes
+			 * from FIFO. It prevents a glitch on SCL.
+			 */
+			i2c_ctrl_stop(dev);
+		} else {
+			/*
+			 * Hold SCL line here in case the hardware releases bus
+			 * immediately after the driver start to read data from
+			 * FIFO. Then we might lose incoming data from device.
+			 */
+			i2c_ctrl_hold_bus(dev, 1);
+		}
+
 		/* Read data bytes from FIFO */
 		for (int i = 0; i < rx_occupied; i++) {
 			*(data->ptr_msg++) = i2c_ctrl_fifo_read(dev);
 		}
 		rx_remain = i2c_ctrl_calculate_msg_remains(dev);
 
-		/* Setup threshold of RX FIFO next time */
+		/* Setup threshold of RX FIFO if needed */
 		if (rx_remain > 0) {
 			i2c_ctrl_fifo_rx_setup_threshold_nack(dev, rx_remain,
 					(data->msg->flags & I2C_MSG_STOP) != 0);
@@ -575,14 +590,8 @@ static void i2c_ctrl_handle_read_int_event(const struct device *dev)
 		}
 	}
 
-	/* Issue STOP after receiving message? */
+	/* Is the STOP condition issued? */
 	if ((data->msg->flags & I2C_MSG_STOP) != 0) {
-		/* Release bus */
-		i2c_ctrl_hold_bus(dev, 0);
-
-		/* Generate a STOP condition immediately */
-		i2c_ctrl_stop(dev);
-
 		/* Clear rx FIFO threshold and status bits */
 		i2c_ctrl_fifo_clear_status(dev);
 
@@ -683,7 +692,7 @@ static void i2c_ctrl_isr(const struct device *dev)
 		i2c_ctrl_stop(dev);
 
 		/* Clear BER Bit */
-		inst_fifo->SMBST |= BIT(NPCX_SMBST_BER);
+		inst_fifo->SMBST = BIT(NPCX_SMBST_BER);
 
 		/* Make sure slave doesn't hold bus by reading FIFO again */
 		tmp = i2c_ctrl_fifo_read(dev);
@@ -702,7 +711,7 @@ static void i2c_ctrl_isr(const struct device *dev)
 		i2c_ctrl_stop(dev);
 
 		/* Clear NEGACK Bit */
-		inst_fifo->SMBST |= BIT(NPCX_SMBST_NEGACK);
+		inst_fifo->SMBST = BIT(NPCX_SMBST_NEGACK);
 
 		/* End transaction */
 		data->oper_state = NPCX_I2C_WAIT_STOP;
@@ -773,8 +782,10 @@ int npcx_i2c_ctrl_transfer(const struct device *i2c_dev, struct i2c_msg *msgs,
 	/* Does bus need recovery? */
 	if (data->oper_state != NPCX_I2C_WRITE_SUSPEND &&
 			data->oper_state != NPCX_I2C_READ_SUSPEND) {
-		if (i2c_ctrl_bus_busy(i2c_dev)) {
+		if (i2c_ctrl_bus_busy(i2c_dev) ||
+		    data->oper_state == NPCX_I2C_ERROR_RECOVERY) {
 			ret = i2c_ctrl_recovery(i2c_dev);
+			/* Recovery failed, return it immediately */
 			if (ret) {
 				return ret;
 			}
@@ -785,6 +796,13 @@ int npcx_i2c_ctrl_transfer(const struct device *i2c_dev, struct i2c_msg *msgs,
 	data->port = port;
 	data->trans_err = 0;
 	data->addr = addr;
+
+	/*
+	 * Reset i2c event-completed semaphore before starting transactions.
+	 * Some interrupt events such as BUS_ERROR might change its counter
+	 * when bus is idle.
+	 */
+	k_sem_reset(&data->sync_sem);
 
 	for (i = 0U; i < num_msgs; i++) {
 		struct i2c_msg *msg = msgs + i;
@@ -814,7 +832,14 @@ int npcx_i2c_ctrl_transfer(const struct device *i2c_dev, struct i2c_msg *msgs,
 	}
 
 	if (data->oper_state == NPCX_I2C_ERROR_RECOVERY) {
-		ret = i2c_ctrl_recovery(i2c_dev);
+		int recovery_error = i2c_ctrl_recovery(i2c_dev);
+		/*
+		 * Recovery failed, return it immediately. Otherwise, the upper
+		 * layer still needs to know why the transaction failed.
+		 */
+		if (recovery_error != 0) {
+			return recovery_error;
+		}
 	}
 
 	return ret;
@@ -874,7 +899,7 @@ static int i2c_ctrl_init(const struct device *dev)
 		IRQ_CONNECT(DT_INST_IRQN(inst),		                       \
 			DT_INST_IRQ(inst, priority),                           \
 			i2c_ctrl_isr,                                          \
-			DEVICE_GET(i2c_ctrl_##inst),                           \
+			DEVICE_DT_INST_GET(inst),                              \
 			0);                                                    \
 		irq_enable(DT_INST_IRQN(inst));                                \
 									       \
@@ -893,8 +918,9 @@ static int i2c_ctrl_init(const struct device *dev)
 									       \
 	static struct i2c_ctrl_data i2c_ctrl_data_##inst;                      \
 									       \
-	DEVICE_AND_API_INIT(i2c_ctrl_##inst, DT_INST_LABEL(inst),              \
+	DEVICE_DT_INST_DEFINE(inst,                                            \
 			    NPCX_I2C_CTRL_INIT_FUNC(inst),                     \
+			    device_pm_control_nop,                             \
 			    &i2c_ctrl_data_##inst, &i2c_ctrl_cfg_##inst,       \
 			    PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,  \
 			    NULL);                                             \

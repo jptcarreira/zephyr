@@ -7,7 +7,7 @@
 
 #if defined(CONFIG_SOC_SERIES_NRF51X) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 
-#include <nrfx/hal/nrf_ppi.h>
+#include <hal/nrf_ppi.h>
 
 static inline void hal_radio_nrf_ppi_channels_enable(uint32_t mask)
 {
@@ -264,9 +264,10 @@ static inline void hal_trigger_rateoverride_ppi_config(void)
 /******************************************************************************/
 #if defined(CONFIG_BT_CTLR_GPIO_PA_PIN) || defined(CONFIG_BT_CTLR_GPIO_LNA_PIN)
 
-#define HAL_ENABLE_PALNA_PPI 15
+#define HAL_ENABLE_PALNA_PPI  15
+#define HAL_DISABLE_PALNA_PPI 16
 
-static inline void hal_enable_palna_ppi_config(void)
+static inline void hal_palna_ppi_setup(void)
 {
 	nrf_ppi_channel_endpoint_setup(
 		NRF_PPI,
@@ -274,12 +275,6 @@ static inline void hal_enable_palna_ppi_config(void)
 		(uint32_t)&(EVENT_TIMER->EVENTS_COMPARE[2]),
 		(uint32_t)&(NRF_GPIOTE->TASKS_OUT[
 				CONFIG_BT_CTLR_PA_LNA_GPIOTE_CHAN]));
-}
-
-#define HAL_DISABLE_PALNA_PPI 16
-
-static inline void hal_disable_palna_ppi_config(void)
-{
 	nrf_ppi_channel_endpoint_setup(
 		NRF_PPI,
 		HAL_DISABLE_PALNA_PPI,
@@ -610,7 +605,7 @@ static inline void hal_radio_sw_switch_ppi_group_setup(void)
 
 #elif defined(CONFIG_SOC_NRF5340_CPUNET)
 
-#include <nrfx/hal/nrf_dppi.h>
+#include <hal/nrf_dppi.h>
 
 static inline void hal_radio_nrf_ppi_channels_enable(uint32_t mask)
 {

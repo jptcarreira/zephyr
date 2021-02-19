@@ -150,6 +150,7 @@ config SCHED_CPU_MASK
 config MAIN_STACK_SIZE
 	int "Size of stack for initialization and main thread"
 	default 2048 if COVERAGE_GCOV
+	default 1024 if TEST_ARM_CORTEX_M
 	default 512 if ZTEST && !(RISCV || X86)
 	default 1024
 	help
@@ -512,15 +513,6 @@ config HEAP_MEM_POOL_SIZE
 	  the memory pool is only limited to available memory. A size of zero
 	  means that no heap memory pool is defined.
 
-config HEAP_MEM_POOL_MIN_SIZE
-	int "The smallest blocks in the heap memory pool (in bytes)"
-	depends on HEAP_MEM_POOL_SIZE != 0
-	default 64
-	help
-	  This option specifies the size of the smallest block in the pool.
-	  Option must be a power of 2 and lower than or equal to the size
-	  of the entire pool.
-
 endif # KERNEL_MEM_POOL
 
 endmenu
@@ -554,7 +546,7 @@ config ARCH_HAS_CUSTOM_BUSY_WAIT
 config SYS_CLOCK_TICKS_PER_SEC
 	int "System tick frequency (in ticks/second)"
 	default 100 if QEMU_TARGET || SOC_POSIX
-	default 10000 if TICKLESS_CAPABLE
+	default 10000 if TICKLESS_KERNEL
 	default 100
 	help
 	  This option specifies the nominal frequency of the system clock in Hz.
@@ -595,18 +587,8 @@ config SYS_CLOCK_EXISTS
 	  this is disabled.  Obviously timeout-related APIs will not
 	  work.
 
-config LEGACY_TIMEOUT_API
-	bool "Support legacy k_timeout_t API"
-	help
-	  The k_timeout_t API has changed to become an opaque type
-	  that must be initialized with macros.  Older applications
-	  can choose this to continue using the old style of timeouts
-	  (which were int32_t counts of milliseconds), at the cost of
-	  not being able to use new features.
-
 config TIMEOUT_64BIT
 	bool "Store kernel timeouts in 64 bit precision"
-	depends on !LEGACY_TIMEOUT_API
 	default y
 	help
 	  When this option is true, the k_ticks_t values passed to
@@ -874,6 +856,7 @@ config TICKLESS_IDLE_THRESH
 config TICKLESS_KERNEL
 	bool "Tickless kernel"
 	default y if TICKLESS_CAPABLE
+	depends on TICKLESS_CAPABLE
 	help
 	  This option enables a fully event driven kernel. Periodic system
 	  clock interrupt generation would be stopped at all times.

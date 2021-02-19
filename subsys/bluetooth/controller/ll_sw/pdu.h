@@ -224,7 +224,7 @@ struct pdu_adv_ext_hdr {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 	uint8_t adv_addr:1;
 	uint8_t tgt_addr:1;
-	uint8_t rfu0:1;
+	uint8_t cte_info:1;
 	uint8_t adi:1;
 	uint8_t aux_ptr:1;
 	uint8_t sync_info:1;
@@ -236,7 +236,7 @@ struct pdu_adv_ext_hdr {
 	uint8_t sync_info:1;
 	uint8_t aux_ptr:1;
 	uint8_t adi:1;
-	uint8_t rfu0:1;
+	uint8_t cte_info:1;
 	uint8_t tgt_addr:1;
 	uint8_t adv_addr:1;
 #else
@@ -311,6 +311,20 @@ enum pdu_adv_aux_phy {
 	EXT_ADV_AUX_PHY_LE_1M  = 0x00,
 	EXT_ADV_AUX_PHY_LE_2M  = 0x01,
 	EXT_ADV_AUX_PHY_LE_COD = 0x02,
+};
+
+struct pdu_cte_info {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+	uint8_t  time:5;
+	uint8_t  rfu:1;
+	uint8_t  type:2;
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	uint8_t  type:2;
+	uint8_t  rfu:1;
+	uint8_t  time:5;
+#else
+#error "Unsupported endianness"
+#endif
 };
 
 struct pdu_adv_sync_info {
@@ -418,6 +432,10 @@ enum pdu_data_llctrl_type {
 	PDU_DATA_LLCTRL_TYPE_PHY_RSP = 0x17,
 	PDU_DATA_LLCTRL_TYPE_PHY_UPD_IND = 0x18,
 	PDU_DATA_LLCTRL_TYPE_MIN_USED_CHAN_IND = 0x19,
+	PDU_DATA_LLCTRL_TYPE_CIS_REQ = 0x1F,
+	PDU_DATA_LLCTRL_TYPE_CIS_RSP = 0x20,
+	PDU_DATA_LLCTRL_TYPE_CIS_IND = 0x21,
+	PDU_DATA_LLCTRL_TYPE_CIS_TERMINATE_IND = 0x22,
 };
 
 struct pdu_data_llctrl_conn_update_ind {
@@ -570,6 +588,69 @@ struct pdu_data_llctrl_min_used_chans_ind {
 	uint8_t min_used_chans;
 } __packed;
 
+struct pdu_data_llctrl_cis_req {
+	uint8_t cig_id;
+	uint8_t cis_id;
+	uint8_t c_phy;
+	uint8_t p_phy;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+	uint16_t c_max_sdu:12;
+	uint16_t rfu0:3;
+	uint16_t framed:1;
+	uint16_t p_max_sdu:12;
+	uint16_t rfu1:4;
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	uint16_t framed:1;
+	uint16_t rfu0:3;
+	uint16_t c_max_sdu:12;
+	uint16_t rfu1:4;
+	uint16_t p_max_sdu:12;
+#else
+#error "Unsupported endianness"
+#endif
+	uint8_t  c_sdu_interval[3];
+	uint8_t  p_sdu_interval[3];
+	uint16_t c_max_pdu;
+	uint16_t p_max_pdu;
+	uint8_t  nse;
+	uint8_t  sub_interval[3];
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+	uint8_t  c_bn:4;
+	uint8_t  p_bn:4;
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	uint8_t  p_bn:4;
+	uint8_t  c_bn:4;
+#else
+#error "Unsupported endianness"
+#endif
+	uint8_t  c_ft;
+	uint8_t  p_ft;
+	uint16_t iso_interval;
+	uint8_t  cis_offset_min[3];
+	uint8_t  cis_offset_max[3];
+	uint16_t conn_event_count;
+} __packed;
+
+struct pdu_data_llctrl_cis_rsp {
+	uint8_t  cis_offset_min[3];
+	uint8_t  cis_offset_max[3];
+	uint16_t conn_event_count;
+} __packed;
+
+struct pdu_data_llctrl_cis_ind {
+	uint32_t aa;
+	uint8_t  cis_offset[3];
+	uint8_t  cig_sync_delay[3];
+	uint8_t  cis_sync_delay[3];
+	uint16_t conn_event_count;
+} __packed;
+
+struct pdu_data_llctrl_cis_terminate_ind {
+	uint8_t  cig_id;
+	uint8_t  cis_id;
+	uint8_t  error_code;
+} __packed;
+
 struct pdu_data_llctrl {
 	uint8_t opcode;
 	union {
@@ -599,8 +680,15 @@ struct pdu_data_llctrl {
 		struct pdu_data_llctrl_phy_rsp phy_rsp;
 		struct pdu_data_llctrl_phy_upd_ind phy_upd_ind;
 		struct pdu_data_llctrl_min_used_chans_ind min_used_chans_ind;
+		struct pdu_data_llctrl_cis_req cis_req;
+		struct pdu_data_llctrl_cis_rsp cis_rsp;
+		struct pdu_data_llctrl_cis_ind cis_ind;
+		struct pdu_data_llctrl_cis_terminate_ind cis_terminate_ind;
 	} __packed;
 } __packed;
+
+#define PDU_DATA_LLCTRL_LEN(type) (offsetof(struct pdu_data_llctrl, type) + \
+				   sizeof(struct pdu_data_llctrl_ ## type))
 
 #if defined(CONFIG_BT_CTLR_PROFILE_ISR)
 struct profile {
@@ -610,6 +698,10 @@ struct profile {
 	uint8_t cur;
 	uint8_t min;
 	uint8_t max;
+	uint8_t radio;
+	uint8_t lll;
+	uint8_t ull_high;
+	uint8_t ull_low;
 } __packed;
 #endif /* CONFIG_BT_CTLR_PROFILE_ISR */
 
@@ -733,7 +825,7 @@ struct pdu_bis {
 	} __packed;
 } __packed;
 
-struct pdu_biginfo {
+struct pdu_big_info {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 	uint32_t offset:14;
 	uint32_t offset_units:1;

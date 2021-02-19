@@ -5,8 +5,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define DT_DRV_COMPAT st_stm32_dma
-
 /**
  * @brief Common part of DMA drivers for stm32.
  * @note  Functions named with stm32_dma_* are SoCs related functions
@@ -17,9 +15,16 @@
 
 #include <init.h>
 #include <drivers/clock_control.h>
+#include <drivers/dma/dma_stm32.h>
 
 #include <logging/log.h>
 LOG_MODULE_REGISTER(dma_stm32, CONFIG_DMA_LOG_LEVEL);
+
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32_dma_v1)
+#define DT_DRV_COMPAT st_stm32_dma_v1
+#elif DT_HAS_COMPAT_STATUS_OKAY(st_stm32_dma_v2)
+#define DT_DRV_COMPAT st_stm32_dma_v2
+#endif
 
 #if DT_NODE_HAS_STATUS(DT_DRV_INST(0), okay)
 #if DT_INST_IRQ_HAS_IDX(0, 7)
@@ -97,14 +102,21 @@ static void dma_stm32_irq_handler(const struct device *dev, uint32_t id)
 	}
 
 	/* the dma stream id is in range from STREAM_OFFSET..<dma-requests> */
-	if (dma_stm32_is_tc_active(dma, id)) {
-		dma_stm32_clear_tc(dma, id);
+	if (stm32_dma_is_ht_irq_active(dma, id)) {
+		/* Let HAL DMA handle flags on its own */
+		if (!stream->hal_override) {
+			dma_stm32_clear_ht(dma, id);
+		}
+		stream->dma_callback(dev, stream->user_data, callback_arg, 0);
+	} else if (stm32_dma_is_tc_irq_active(dma, id)) {
 #ifdef CONFIG_DMAMUX_STM32
 		stream->busy = false;
 #endif
+		/* Let HAL DMA handle flags on its own */
+		if (!stream->hal_override) {
+			dma_stm32_clear_tc(dma, id);
+		}
 		stream->dma_callback(dev, stream->user_data, callback_arg, 0);
-	} else if (dma_stm32_is_ht_active(dma, id)) {
-		dma_stm32_clear_ht(dma, id);
 	} else if (stm32_dma_is_unexpected_irq_happened(dma, id)) {
 		LOG_ERR("Unexpected irq happened.");
 		stream->dma_callback(dev, stream->user_data,
@@ -250,6 +262,19 @@ DMA_STM32_EXPORT_API int dma_stm32_configure(const struct device *dev,
 
 	/* give channel from index 0 */
 	id = id - STREAM_OFFSET;
+
+	/* Check potential DMA override */
+	if (config->linked_channel == STM32_DMA_HAL_OVERRIDE) {
+		/* DMA channel is overridden by HAL DMA
+		 * Retain that the channel is busy and proceed to the minimal
+		 * configuration to properly route the IRQ
+		 */
+		stream->busy = true;
+		stream->hal_override = true;
+		stream->dma_callback = config->dma_callback;
+		stream->user_data = config->user_data;
+		return 0;
+	}
 
 	if (id >= dev_config->max_streams) {
 		LOG_ERR("cannot configure the dma stream %d.", id);
@@ -552,8 +577,7 @@ DMA_STM32_EXPORT_API int dma_stm32_stop(const struct device *dev, uint32_t id)
 static int dma_stm32_init(const struct device *dev)
 {
 	const struct dma_stm32_config *config = dev->config;
-	const struct device *clk =
-		device_get_binding(STM32_CLOCK_CONTROL_NAME);
+	const struct device *clk = DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE);
 
 	if (clock_control_on(clk,
 		(clock_control_subsys_t *) &config->pclken) != 0) {
@@ -610,6 +634,13 @@ static const struct dma_driver_api dma_funcs = {
 #define DMA_STM32_OFFSET_INIT(index)
 #endif /* CONFIG_DMAMUX_STM32 */
 
+#ifdef CONFIG_DMA_STM32_V1
+#define DMA_STM32_MEM2MEM_INIT(index)					\
+	.support_m2m = DT_INST_PROP(index, st_mem2mem),
+#else
+#define DMA_STM32_MEM2MEM_INIT(index)
+#endif /* CONFIG_DMA_STM32_V1 */					\
+
 #define DMA_STM32_INIT_DEV(index)					\
 static struct dma_stm32_stream						\
 	dma_stm32_streams_##index[DMA_STM32_##index##_STREAM_COUNT];	\
@@ -619,7 +650,7 @@ const struct dma_stm32_config dma_stm32_config_##index = {		\
 		    .enr = DT_INST_CLOCKS_CELL(index, bits) },		\
 	.config_irq = dma_stm32_config_irq_##index,			\
 	.base = DT_INST_REG_ADDR(index),				\
-	.support_m2m = DT_INST_PROP(index, st_mem2mem),			\
+	DMA_STM32_MEM2MEM_INIT(index)					\
 	.max_streams = DMA_STM32_##index##_STREAM_COUNT,		\
 	.streams = dma_stm32_streams_##index,				\
 	DMA_STM32_OFFSET_INIT(index)					\
@@ -672,8 +703,6 @@ static void dma_stm32_irq_##dma##_##chan(const struct device *dev)	\
 
 #if DT_NODE_HAS_STATUS(DT_DRV_INST(0), okay)
 
-DEVICE_DT_INST_DECLARE(0);
-
 DMA_STM32_DEFINE_IRQ_HANDLER(0, 0);
 DMA_STM32_DEFINE_IRQ_HANDLER(0, 1);
 DMA_STM32_DEFINE_IRQ_HANDLER(0, 2);
@@ -720,8 +749,6 @@ DMA_STM32_INIT_DEV(0);
 
 
 #if DT_NODE_HAS_STATUS(DT_DRV_INST(1), okay)
-
-DEVICE_DT_INST_DECLARE(1);
 
 DMA_STM32_DEFINE_IRQ_HANDLER(1, 0);
 DMA_STM32_DEFINE_IRQ_HANDLER(1, 1);

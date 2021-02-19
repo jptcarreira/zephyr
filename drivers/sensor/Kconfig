@@ -92,6 +92,8 @@ source "drivers/sensor/hp206c/Kconfig"
 
 source "drivers/sensor/hts221/Kconfig"
 
+source "drivers/sensor/icm42605/Kconfig"
+
 source "drivers/sensor/iis2dh/Kconfig"
 
 source "drivers/sensor/iis2dlpc/Kconfig"
@@ -139,6 +141,8 @@ source "drivers/sensor/max17055/Kconfig"
 source "drivers/sensor/max30101/Kconfig"
 
 source "drivers/sensor/max44009/Kconfig"
+
+source "drivers/sensor/max6675/Kconfig"
 
 source "drivers/sensor/mchp_tach_xec/Kconfig"
 

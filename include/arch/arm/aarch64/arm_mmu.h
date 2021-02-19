@@ -19,12 +19,14 @@
 #define MT_DEVICE_GRE		2U
 #define MT_NORMAL_NC		3U
 #define MT_NORMAL		4U
+#define MT_NORMAL_WT		5U
 
 #define MEMORY_ATTRIBUTES	((0x00 << (MT_DEVICE_nGnRnE * 8)) |	\
 				(0x04 << (MT_DEVICE_nGnRE * 8))   |	\
 				(0x0c << (MT_DEVICE_GRE * 8))     |	\
 				(0x44 << (MT_NORMAL_NC * 8))      |	\
-				(0xffUL << (MT_NORMAL * 8)))
+				(0xffUL << (MT_NORMAL * 8))	  |	\
+				(0xbbUL << (MT_NORMAL_WT * 8)))
 
 /* More flags from user's perpective are supported using remaining bits
  * of "attrs" field, i.e. attrs[31:3], underlying code will take care
@@ -36,6 +38,7 @@
  * attrs[5] : Execute Permissions privileged mode (PXN)
  * attrs[6] : Execute Permissions unprivileged mode (UXN)
  * attrs[7] : Mirror RO/RW permissions to EL0
+ * attrs[8] : Overwrite existing mapping if any
  *
  */
 #define MT_PERM_SHIFT		3U
@@ -43,6 +46,7 @@
 #define MT_P_EXECUTE_SHIFT	5U
 #define MT_U_EXECUTE_SHIFT	6U
 #define MT_RW_AP_SHIFT		7U
+#define MT_OVERWRITE_SHIFT	8U
 
 #define MT_RO			(0U << MT_PERM_SHIFT)
 #define MT_RW			(1U << MT_PERM_SHIFT)
@@ -58,6 +62,8 @@
 
 #define MT_U_EXECUTE		(0U << MT_U_EXECUTE_SHIFT)
 #define MT_U_EXECUTE_NEVER	(1U << MT_U_EXECUTE_SHIFT)
+
+#define MT_OVERWRITE		(1U << MT_OVERWRITE_SHIFT)
 
 #define MT_P_RW_U_RW		(MT_RW | MT_RW_AP_ELx | MT_P_EXECUTE_NEVER | MT_U_EXECUTE_NEVER)
 #define MT_P_RW_U_NA		(MT_RW | MT_RW_AP_EL_HIGHER  | MT_P_EXECUTE_NEVER | MT_U_EXECUTE_NEVER)
@@ -139,23 +145,28 @@
 /* Region definition data structure */
 struct arm_mmu_region {
 	/* Region Base Physical Address */
-	uint64_t base_pa;
+	uintptr_t base_pa;
 	/* Region Base Virtual Address */
-	uint64_t base_va;
+	uintptr_t base_va;
 	/* Region size */
-	uint64_t size;
+	size_t size;
 	/* Region Name */
 	const char *name;
 	/* Region Attributes */
-	unsigned int attrs;
+	uint32_t attrs;
 };
 
 /* MMU configuration data structure */
 struct arm_mmu_config {
 	/* Number of regions */
-	uint32_t num_regions;
+	unsigned int num_regions;
 	/* Regions */
 	const struct arm_mmu_region *mmu_regions;
+};
+
+struct arm_mmu_ptables {
+	uint64_t *xlat_tables;
+	unsigned int next_table;
 };
 
 /* Convenience macros to represent the ARMv8-A-specific

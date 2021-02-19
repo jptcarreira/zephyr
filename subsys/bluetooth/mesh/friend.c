@@ -178,6 +178,7 @@ static void friend_clear(struct bt_mesh_friend *frnd)
 		}
 	}
 
+	frnd->counter++;
 	frnd->subnet = NULL;
 	frnd->established = 0U;
 	frnd->pending_buf = 0U;
@@ -349,7 +350,12 @@ static int unseg_app_sdu_unpack(struct bt_mesh_friend *frnd,
 				struct unseg_app_sdu_meta *meta)
 {
 	uint16_t app_idx = FRIEND_ADV(buf)->app_idx;
-	struct bt_mesh_net_rx net;
+	struct bt_mesh_net_rx net = {
+		.ctx = {
+			.app_idx = app_idx,
+			.net_idx = frnd->subnet->net_idx,
+		},
+	};
 	int err;
 
 	meta->subnet = frnd->subnet;
@@ -426,11 +432,16 @@ static int unseg_app_sdu_prepare(struct bt_mesh_friend *frnd,
 		return 0;
 	}
 
+	BT_DBG("Re-encrypting friend pdu (SeqNum %06x -> %06x)",
+	       meta.crypto.seq_num, bt_mesh.seq);
+
 	err = unseg_app_sdu_decrypt(frnd, buf, &meta);
 	if (err) {
 		BT_WARN("Decryption failed! %d", err);
 		return err;
 	}
+
+	meta.crypto.seq_num = bt_mesh.seq;
 
 	err = unseg_app_sdu_encrypt(frnd, buf, &meta);
 	if (err) {
@@ -863,6 +874,10 @@ static void enqueue_offer(struct bt_mesh_friend *frnd, int8_t rssi)
 	off->queue_size = CONFIG_BT_MESH_FRIEND_QUEUE_SIZE,
 	off->sub_list_size = ARRAY_SIZE(frnd->sub_list),
 	off->rssi = rssi,
+
+	/* The Counter may be used in the later key update procedure. Therefore
+	 * we should postpone the update of counter until we terminated friendship.
+	 */
 	off->frnd_counter = sys_cpu_to_be16(frnd->counter);
 
 	buf = encode_friend_ctl(frnd, TRANS_CTL_OP_FRIEND_OFFER, &sdu);
@@ -874,8 +889,6 @@ static void enqueue_offer(struct bt_mesh_friend *frnd, int8_t rssi)
 	if (encrypt_friend_pdu(frnd, buf, true)) {
 		return;
 	}
-
-	frnd->counter++;
 
 	if (frnd->last) {
 		net_buf_unref(frnd->last);

@@ -1758,25 +1758,6 @@ macro(assert_exists var)
   endif()
 endmacro()
 
-function(print_usage)
-  if(NOT CMAKE_MAKE_PROGRAM)
-    # Create dummy project, in order to obtain make program for correct usage printing.
-    project(dummy_print_usage)
-  endif()
-  message("see usage:")
-  string(REPLACE ";" " " BOARD_ROOT_SPACE_SEPARATED "${BOARD_ROOT}")
-  string(REPLACE ";" " " SHIELD_LIST_SPACE_SEPARATED "${SHIELD_LIST}")
-  execute_process(
-    COMMAND
-    ${CMAKE_COMMAND}
-    -DZEPHYR_BASE=${ZEPHYR_BASE}
-    -DBOARD_ROOT_SPACE_SEPARATED=${BOARD_ROOT_SPACE_SEPARATED}
-    -DSHIELD_LIST_SPACE_SEPARATED=${SHIELD_LIST_SPACE_SEPARATED}
-    -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
-    -P ${ZEPHYR_BASE}/cmake/usage/usage.cmake
-    )
-endfunction()
-
 # 3.5. File system management
 function(check_if_directory_is_writeable dir ok)
   execute_process(
@@ -1980,6 +1961,47 @@ Relative paths are only allowed with `-D${ARGV1}=<path>`")
 endfunction()
 
 # Usage:
+#   zephyr_string(<mode> <out-var> <input> ...)
+#
+# Zephyr string function extension.
+# This function extends the CMake string function by providing additional
+# manipulation arguments to CMake string.
+#
+# SANITIZE: Ensure that the output string does not contain any special
+#           characters. Special characters, such as -, +, =, $, etc. are
+#           converted to underscores '_'.
+#
+# SANITIZE TOUPPER: Ensure that the output string does not contain any special
+#                   characters. Special characters, such as -, +, =, $, etc. are
+#                   converted to underscores '_'.
+#                   The sanitized string will be returned in UPPER case.
+#
+# returns the updated string
+function(zephyr_string)
+  set(options SANITIZE TOUPPER)
+  cmake_parse_arguments(ZEPHYR_STRING "${options}" "" "" ${ARGN})
+
+  if (NOT ZEPHYR_STRING_UNPARSED_ARGUMENTS)
+    message(FATAL_ERROR "Function zephyr_string() called without a return variable")
+  endif()
+
+  list(GET ZEPHYR_STRING_UNPARSED_ARGUMENTS 0 return_arg)
+  list(REMOVE_AT ZEPHYR_STRING_UNPARSED_ARGUMENTS 0)
+
+  list(JOIN ZEPHYR_STRING_UNPARSED_ARGUMENTS "" work_string)
+
+  if(ZEPHYR_STRING_SANITIZE)
+    string(REGEX REPLACE "[^a-zA-Z0-9_]" "_" work_string ${work_string})
+  endif()
+
+  if(ZEPHYR_STRING_TOUPPER)
+    string(TOUPPER ${work_string} work_string)
+  endif()
+
+  set(${return_arg} ${work_string} PARENT_SCOPE)
+endfunction()
+
+# Usage:
 #   zephyr_check_cache(<variable> [REQUIRED])
 #
 # Check the current CMake cache for <variable> and warn the user if the value
@@ -2113,4 +2135,28 @@ function(zephyr_get_targets directory types targets)
         zephyr_get_targets(${directory} "${types}" ${targets})
     endforeach()
     set(${targets} ${${targets}} PARENT_SCOPE)
+endfunction()
+
+# Usage:
+#   target_byproducts(TARGET <target> BYPRODUCTS <file> [<file>...])
+#
+# Specify additional BYPRODUCTS that this target produces.
+#
+# This function allows the build system to specify additional byproducts to
+# target created with `add_executable()`. When linking an executable the linker
+# may produce additional files, like map files. Those files are not known to the
+# build system. This function makes it possible to describe such additional
+# byproducts in an easy manner.
+function(target_byproducts)
+  cmake_parse_arguments(TB "" "TARGET" "BYPRODUCTS" ${ARGN})
+
+  if(NOT DEFINED TB_TARGET)
+    message(FATAL_ERROR "target_byproducts() missing parameter: TARGET <target>")
+  endif()
+
+  add_custom_command(TARGET ${TB_TARGET}
+                     POST_BUILD COMMAND ${CMAKE_COMMAND} -E echo ""
+                     BYPRODUCTS ${TB_BYPRODUCTS}
+                     COMMENT "Logical command for additional byproducts on target: ${TB_TARGET}"
+  )
 endfunction()

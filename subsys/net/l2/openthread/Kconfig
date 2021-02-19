@@ -137,6 +137,10 @@ config OPENTHREAD_PKT_LIST_SIZE
 	int "List size for IPv6 packet buffering"
 	default 10
 
+config OPENTHREAD_RADIO_WORKQUEUE_STACK_SIZE
+	int "OpenThread radio transmit workqueue stack size"
+	default 512
+
 endmenu # "Zephyr optimizations"
 
 config OPENTHREAD_SHELL
@@ -217,12 +221,6 @@ config OPENTHREAD_COPROCESSOR_VENDOR_HOOK_SOURCE
 	string "Path to vendor hook source file"
 	help
 	  Provides path to compile vendor hook file.
-
-config OPENTHREAD_NCP_BUFFER_SIZE
-	int "The size of the NCP buffers"
-	default 2048
-	help
-	  The size of the NCP buffers.
 
 endif # OPENTHREAD_COPROCESSOR
 

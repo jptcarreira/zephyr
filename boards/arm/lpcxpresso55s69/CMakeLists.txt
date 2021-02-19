@@ -21,10 +21,10 @@ if (CONFIG_BUILD_WITH_TFM)
 		set(TFM_IMAGE_VERSION_NS 0.0.0+0)
 	endif()
 
-	if (NOT CONFIG_TFM_BL2_FALSE)
+	if (CONFIG_TFM_BL2)
 		set(PREPROCESSED_FILE_S "${CMAKE_BINARY_DIR}/tfm/bl2/ext/mcuboot/CMakeFiles/signing_layout_s.dir/signing_layout_s.o")
 		set(PREPROCESSED_FILE_NS "${CMAKE_BINARY_DIR}/tfm/bl2/ext/mcuboot/CMakeFiles/signing_layout_ns.dir/signing_layout_ns.o")
-		set(TFM_MCUBOOT_DIR "${ZEPHYR_TFM_MODULE_DIR}/trusted-firmware-m/bl2/ext/mcuboot")
+		set(TFM_MCUBOOT_DIR "${ZEPHYR_TRUSTED_FIRMWARE_M_MODULE_DIR}/trusted-firmware-m/bl2/ext/mcuboot")
 	endif()
 
 	# Configure which format (full or hash) to include the public key in
@@ -37,7 +37,7 @@ if (CONFIG_BUILD_WITH_TFM)
 		message(FATAL_ERROR "'srec_cat' not found. Please install it, or add it to $PATH.")
 	endif()
 
-	if (CONFIG_TFM_BL2_FALSE)
+	if (NOT CONFIG_TFM_BL2)
 		#merge tfm_s and zephyr_ns to a single image
 		#offset needs to be the same value as flash_layout.h in TFM
 		set_property(GLOBAL APPEND PROPERTY extra_post_build_commands
@@ -97,4 +97,22 @@ if (CONFIG_BUILD_WITH_TFM)
 				-o ${CMAKE_BINARY_DIR}/tfm_merged.bin -Binary
 		)
 	endif()
+endif()
+
+if (CONFIG_SECOND_CORE_MCUX)
+	# Set srec_cat binary name
+	find_program(SREC_CAT srec_cat)
+	if(${SREC_CAT} STREQUAL SREC_CAT-NOTFOUND)
+		message(FATAL_ERROR "'srec_cat' not found. Please install it, or add it to $PATH.")
+	endif()
+
+	#merge cpu0 and cpu1 to a single image
+	#offset is taken from zephyr,code-cpu1-partition
+	set_property(GLOBAL APPEND PROPERTY extra_post_build_commands
+		COMMAND ${SREC_CAT}
+		ARGS ${CMAKE_BINARY_DIR}/zephyr/${KERNEL_BIN_NAME} -Binary
+			${REMOTE_ZEPHYR_DIR}/${KERNEL_BIN_NAME} -Binary
+			-offset ${CONFIG_SECOND_CORE_BOOT_ADDRESS_MCUX}
+			-o ${CMAKE_BINARY_DIR}/multicore.bin -Binary
+	)
 endif()

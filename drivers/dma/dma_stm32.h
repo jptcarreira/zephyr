@@ -21,6 +21,7 @@ struct dma_stm32_stream {
 	int mux_channel; /* stores the dmamux channel */
 #endif /* CONFIG_DMAMUX_STM32 */
 	bool source_periph;
+	bool hal_override;
 	volatile bool busy;
 	uint32_t src_size;
 	uint32_t dst_size;
@@ -80,6 +81,8 @@ void dma_stm32_clear_gi(DMA_TypeDef *DMAx, uint32_t id);
 #endif
 
 bool stm32_dma_is_irq_active(DMA_TypeDef *dma, uint32_t id);
+bool stm32_dma_is_ht_irq_active(DMA_TypeDef *dma, uint32_t id);
+bool stm32_dma_is_tc_irq_active(DMA_TypeDef *dma, uint32_t id);
 
 void stm32_dma_dump_stream_irq(DMA_TypeDef *dma, uint32_t id);
 void stm32_dma_clear_stream_irq(DMA_TypeDef *dma, uint32_t id);

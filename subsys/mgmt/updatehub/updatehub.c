@@ -256,7 +256,6 @@ static int send_request(enum coap_msgtype msgtype, enum coap_method method,
 {
 	struct coap_packet request_packet;
 	int ret = -1;
-	uint8_t content_application_json = 50;
 	uint8_t *data = k_malloc(MAX_PAYLOAD_SIZE);
 
 	if (data == NULL) {
@@ -264,8 +263,9 @@ static int send_request(enum coap_msgtype msgtype, enum coap_method method,
 		goto error;
 	}
 
-	ret = coap_packet_init(&request_packet, data, MAX_PAYLOAD_SIZE, 1,
-			       COAP_TYPE_CON, 8, coap_next_token(), method,
+	ret = coap_packet_init(&request_packet, data, MAX_PAYLOAD_SIZE,
+			       COAP_VERSION_1, COAP_TYPE_CON,
+			       COAP_TOKEN_MAX_LEN, coap_next_token(), method,
 			       coap_next_id());
 	if (ret < 0) {
 		LOG_ERR("Could not init packet");
@@ -314,10 +314,9 @@ static int send_request(enum coap_msgtype msgtype, enum coap_method method,
 			goto error;
 		}
 
-		ret = coap_packet_append_option(&request_packet,
-						COAP_OPTION_CONTENT_FORMAT,
-						&content_application_json,
-						sizeof(content_application_json));
+		ret = coap_append_option_int(&request_packet,
+					     COAP_OPTION_CONTENT_FORMAT,
+					     COAP_CONTENT_FORMAT_APP_JSON);
 		if (ret < 0) {
 			LOG_ERR("Unable add option to request format");
 			goto error;

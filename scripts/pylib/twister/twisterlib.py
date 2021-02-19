@@ -554,6 +554,7 @@ class BinaryHandler(Handler):
                 t.join()
             proc.wait()
             self.returncode = proc.returncode
+            self.try_kill_process_by_pid()
 
         handler_time = time.time() - start_time
 
@@ -561,12 +562,11 @@ class BinaryHandler(Handler):
             subprocess.call(["GCOV_PREFIX=" + self.build_dir,
                              "gcov", self.sourcedir, "-b", "-s", self.build_dir], shell=True)
 
-        self.try_kill_process_by_pid()
-
         # FIXME: This is needed when killing the simulator, the console is
         # garbled and needs to be reset. Did not find a better way to do that.
+        if sys.stdout.isatty():
+            subprocess.call(["stty", "sane"])
 
-        subprocess.call(["stty", "sane"])
         self.instance.results = harness.tests
 
         if not self.terminated and self.returncode != 0:
@@ -605,6 +605,14 @@ class DeviceHandler(Handler):
         ser_fileno = ser.fileno()
         readlist = [halt_fileno, ser_fileno]
 
+        if self.coverage:
+            # Set capture_coverage to True to indicate that right after
+            # test results we should get coverage data, otherwise we exit
+            # from the test.
+            harness.capture_coverage = True
+
+        ser.flush()
+
         while ser.isOpen():
             readable, _, _ = select.select(readlist, [], [], self.timeout)
 
@@ -635,35 +643,34 @@ class DeviceHandler(Handler):
                 harness.handle(sl.rstrip())
 
             if harness.state:
-                ser.close()
-                break
+                if not harness.capture_coverage:
+                    ser.close()
+                    break
 
         log_out_fp.close()
 
+    def get_available_device(self, instance):
+        device = instance.platform.name
+        for d in self.suite.duts:
+            if d.platform == device and d.available and (d.serial or d.serial_pty):
+                d.available = 0
+                d.counter += 1
+                return d
+
+        return None
+
     def device_is_available(self, instance):
-        ret = False
         device = instance.platform.name
         fixture = instance.testcase.harness_config.get("fixture")
         for d in self.suite.duts:
             if fixture and fixture not in d.fixtures:
                 continue
             if d.platform == device and d.available and (d.serial or d.serial_pty):
-                ret = True
-                break
-
-        return ret
-
-    def get_available_device(self, instance):
-        ret = None
-        device = instance.platform.name
-        for d in self.suite.duts:
-            if d.platform == device and d.available and (d.serial or d.serial_pty):
                 d.available = 0
                 d.counter += 1
-                ret = d
-                break
+                return d
 
-        return ret
+        return None
 
     def make_device_available(self, serial):
         for d in self.suite.duts:
@@ -686,15 +693,15 @@ class DeviceHandler(Handler):
         out_state = "failed"
         runner = None
 
-        while not self.device_is_available(self.instance):
+        hardware = self.device_is_available(self.instance)
+        while not hardware:
             logger.debug("Waiting for device {} to become available".format(self.instance.platform.name))
             time.sleep(1)
+            hardware = self.device_is_available(self.instance)
 
-        hardware = self.get_available_device(self.instance)
-        if hardware:
-            runner = hardware.runner or self.suite.west_runner
-
+        runner = hardware.runner or self.suite.west_runner
         serial_pty = hardware.serial_pty
+
         ser_pty_process = None
         if serial_pty:
             master, slave = pty.openpty()
@@ -1064,7 +1071,8 @@ class QEMUHandler(Handler):
         self.thread.daemon = True
         logger.debug("Spawning QEMUHandler Thread for %s" % self.name)
         self.thread.start()
-        subprocess.call(["stty", "sane"])
+        if sys.stdout.isatty():
+            subprocess.call(["stty", "sane"])
 
         logger.debug("Running %s (%s)" % (self.name, self.type_str))
         command = [self.generator_cmd]
@@ -2036,6 +2044,37 @@ class CMake():
 
         return results
 
+    @staticmethod
+    def run_cmake_script(args=[]):
+
+        logger.debug("Running cmake script %s" % (args[0]))
+
+        cmake_args = ["-D{}".format(a.replace('"', '')) for a in args[1:]]
+        cmake_args.extend(['-P', args[0]])
+
+        logger.debug("Calling cmake with arguments: {}".format(cmake_args))
+        cmake = shutil.which('cmake')
+        cmd = [cmake] + cmake_args
+
+        kwargs = dict()
+        kwargs['stdout'] = subprocess.PIPE
+        # CMake sends the output of message() to stderr unless it's STATUS
+        kwargs['stderr'] = subprocess.STDOUT
+
+        p = subprocess.Popen(cmd, **kwargs)
+        out, _ = p.communicate()
+
+        if p.returncode == 0:
+            msg = "Finished running  %s" % (args[0])
+            logger.debug(msg)
+            results = {"returncode": p.returncode, "msg": msg, "stdout": out}
+
+        else:
+            logger.error("Cmake script failure: %s" % (args[0]))
+            results = {"returncode": p.returncode}
+
+        return results
+
 
 class FilterBuilder(CMake):
 
@@ -2203,6 +2242,7 @@ class ProjectBuilder(FilterBuilder):
             instance.handler.call_make_run = True
         elif self.device_testing:
             instance.handler = DeviceHandler(instance, "device")
+            instance.handler.coverage = self.coverage
         elif instance.platform.simulation == "nsim":
             if find_executable("nsimdrv"):
                 instance.handler = BinaryHandler(instance, "nsim")
@@ -2558,6 +2598,7 @@ class TestSuite(DisablePyTestCollectionMixin):
         self.testcases = {}
         self.platforms = []
         self.selected_platforms = []
+        self.filtered_platforms = []
         self.default_platforms = []
         self.outdir = os.path.abspath(outdir)
         self.discards = {}
@@ -2580,7 +2621,7 @@ class TestSuite(DisablePyTestCollectionMixin):
 
     def check_zephyr_version(self):
         try:
-            subproc = subprocess.run(["git", "describe"],
+            subproc = subprocess.run(["git", "describe", "--abbrev=12"],
                                      stdout=subprocess.PIPE,
                                      universal_newlines=True,
                                      cwd=ZEPHYR_BASE)
@@ -2727,15 +2768,15 @@ class TestSuite(DisablePyTestCollectionMixin):
             logger.info("In total {} test cases were executed, {} skipped on {} out of total {} platforms ({:02.2f}%)".format(
                 results.cases - results.skipped_cases,
                 results.skipped_cases,
-                len(self.selected_platforms),
+                len(self.filtered_platforms),
                 self.total_platforms,
-                (100 * len(self.selected_platforms) / len(self.platforms))
+                (100 * len(self.filtered_platforms) / len(self.platforms))
             ))
 
         logger.info(f"{Fore.GREEN}{run}{Fore.RESET} test configurations executed on platforms, \
 {Fore.RED}{results.total - run - results.skipped_configs}{Fore.RESET} test configurations were only built.")
 
-    def save_reports(self, name, suffix, report_dir, no_update, release, only_failed, platform_reports):
+    def save_reports(self, name, suffix, report_dir, no_update, release, only_failed, platform_reports, json_report):
         if not self.instances:
             return
 
@@ -2762,7 +2803,9 @@ class TestSuite(DisablePyTestCollectionMixin):
             self.xunit_report(filename + "_report.xml", full_report=True,
                               append=only_failed, version=self.version)
             self.csv_report(filename + ".csv")
-            self.json_report(filename + ".json", append=only_failed, version=self.version)
+
+            if json_report:
+                self.json_report(filename + ".json", append=only_failed, version=self.version)
 
             if platform_reports:
                 self.target_report(outdir, suffix, append=only_failed)
@@ -2806,19 +2849,17 @@ class TestSuite(DisablePyTestCollectionMixin):
 
     @staticmethod
     def get_toolchain():
-        toolchain = os.environ.get("ZEPHYR_TOOLCHAIN_VARIANT", None) or \
-                    os.environ.get("ZEPHYR_GCC_VARIANT", None)
-
-        if toolchain == "gccarmemb":
-            # Remove this translation when gccarmemb is no longer supported.
-            toolchain = "gnuarmemb"
+        toolchain_script = Path(ZEPHYR_BASE) / Path('cmake/verify-toolchain.cmake')
+        result = CMake.run_cmake_script([toolchain_script, "FORMAT=json"])
 
         try:
-            if not toolchain:
+            if result['returncode']:
                 raise TwisterRuntimeError("E: Variable ZEPHYR_TOOLCHAIN_VARIANT is not defined")
         except Exception as e:
             print(str(e))
             sys.exit(2)
+        toolchain = json.loads(result['stdout'])['ZEPHYR_TOOLCHAIN_VARIANT']
+        logger.info(f"Using '{toolchain}' toolchain.")
 
         return toolchain
 
@@ -2989,9 +3030,15 @@ class TestSuite(DisablePyTestCollectionMixin):
         logger.info("Building initial testcase list...")
 
         for tc_name, tc in self.testcases.items():
+
+            if tc.build_on_all and not platform_filter:
+                platform_scope = self.platforms
+            else:
+                platform_scope = platforms
+
             # list of instances per testcase, aka configurations.
             instance_list = []
-            for plat in platforms:
+            for plat in platform_scope:
                 instance = TestInstance(tc, plat, self.outdir)
                 if runnable:
                     tfilter = 'runnable'
@@ -3028,9 +3075,6 @@ class TestSuite(DisablePyTestCollectionMixin):
 
                 if tc.skip:
                     discards[instance] = discards.get(instance, "Skip filter")
-
-                if tc.build_on_all and not platform_filter:
-                    platform_filter = []
 
                 if tag_filter and not tc.tags.intersection(tag_filter):
                     discards[instance] = discards.get(instance, "Command line testcase tag filter")
@@ -3136,6 +3180,9 @@ class TestSuite(DisablePyTestCollectionMixin):
             instance.reason = self.discards[instance]
             instance.status = "skipped"
             instance.fill_results_by_status()
+
+        self.filtered_platforms = set(p.platform.name for p in self.instances.values()
+                                      if p.status != "skipped" )
 
         return discards
 
@@ -3404,8 +3451,8 @@ class TestSuite(DisablePyTestCollectionMixin):
                                     'error',
                                     type="failure",
                                     message="failed")
-                            p = os.path.join(self.outdir, instance.platform.name, instance.testcase.name)
-                            log_file = os.path.join(p, "handler.log")
+                            log_root = os.path.join(self.outdir, instance.platform.name, instance.testcase.name)
+                            log_file = os.path.join(log_root, "handler.log")
                             el.text = self.process_log(log_file)
 
                         elif instance.results[k] == 'PASS' \
@@ -3441,9 +3488,9 @@ class TestSuite(DisablePyTestCollectionMixin):
                             type="failure",
                             message=instance.reason)
 
-                        p = ("%s/%s/%s" % (self.outdir, instance.platform.name, instance.testcase.name))
-                        bl = os.path.join(p, "build.log")
-                        hl = os.path.join(p, "handler.log")
+                        log_root = ("%s/%s/%s" % (self.outdir, instance.platform.name, instance.testcase.name))
+                        bl = os.path.join(log_root, "build.log")
+                        hl = os.path.join(log_root, "handler.log")
                         log_file = bl
                         if instance.reason != 'Build error':
                             if os.path.exists(hl):
@@ -3486,39 +3533,31 @@ class TestSuite(DisablePyTestCollectionMixin):
                     rowdict["rom_size"] = rom_size
                 cw.writerow(rowdict)
 
-    def json_report(self, filename, platform=None, append=False, version="NA"):
+    def json_report(self, filename, append=False, version="NA"):
         logger.info(f"Writing JSON report {filename}")
-        rowdict = {}
-        results_dict = {}
-        rowdict["test_suite"] = []
-        results_dict["test_details"] = []
-        new_dict = {}
+        report = {}
+        selected = self.selected_platforms
+        report["environment"] = {"os": os.name,
+                                 "zephyr_version": version,
+                                 "toolchain": self.get_toolchain()
+                                 }
+        json_data = {}
+        if os.path.exists(filename) and append:
+            with open(filename, 'r') as json_file:
+                json_data = json.load(json_file)
 
-        if platform:
-            selected = [platform]
+        suites = json_data.get("testsuites", [])
+        if suites:
+            suite = suites[0]
+            testcases = suite.get("testcases", [])
         else:
-            selected = self.selected_platforms
+            suite = {}
+            testcases = []
 
-        rowdict["test_environment"] = {"os": os.name,
-                                        "zephyr_version": version,
-                                        "toolchain": self.get_toolchain()
-                                        }
         for p in selected:
-            json_dict = {}
             inst = self.get_platform_instances(p)
-
-            if os.path.exists(filename) and append:
-                with open(filename, 'r') as report:
-                    data = json.load(report)
-
-                for i in data["test_suite"]:
-                    test_details = i["test_details"]
-                    for test_data in test_details:
-                        if test_data.get("status") != "failed":
-                            new_dict = test_data
-                            results_dict["test_details"].append(new_dict)
-
             for _, instance in inst.items():
+                testcase = {}
                 handler_log = os.path.join(instance.build_dir, "handler.log")
                 build_log = os.path.join(instance.build_dir, "build.log")
                 device_log = os.path.join(instance.build_dir, "device.log")
@@ -3526,58 +3565,42 @@ class TestSuite(DisablePyTestCollectionMixin):
                 handler_time = instance.metrics.get('handler_time', 0)
                 ram_size = instance.metrics.get ("ram_size", 0)
                 rom_size  = instance.metrics.get("rom_size",0)
-                if os.path.exists(filename) and append:
-                    json_dict = {"testcase": instance.testcase.name,
-                                    "arch": instance.platform.arch,
-                                    "type": instance.testcase.type,
-                                    "platform": p,
-                                    }
-                    if instance.status in ["error", "failed", "timeout"]:
-                        json_dict["status"] = "failed"
-                        json_dict["reason"] = instance.reason
-                        json_dict["execution_time"] =  handler_time
+
+                for k in instance.results.keys():
+                    testcases = list(filter(lambda d: not (d.get('testcase') == k and d.get('platform') == p), testcases ))
+                    testcase = {"testcase": k,
+                                "arch": instance.platform.arch,
+                                "platform": p,
+                                }
+                    if instance.results[k] in ["PASS"]:
+                        testcase["status"] = "passed"
+                        if instance.handler:
+                            testcase["execution_time"] =  handler_time
+                        if ram_size:
+                            testcase["ram_size"] = ram_size
+                        if rom_size:
+                            testcase["rom_size"] = rom_size
+
+                    elif instance.results[k] in ['FAIL', 'BLOCK'] or instance.status in ["error", "failed", "timeout"]:
+                        testcase["status"] = "failed"
+                        testcase["reason"] = instance.reason
+                        testcase["execution_time"] =  handler_time
                         if os.path.exists(handler_log):
-                            json_dict["test_output"] = self.process_log(handler_log)
+                            testcase["test_output"] = self.process_log(handler_log)
                         elif os.path.exists(device_log):
-                            json_dict["device_log"] = self.process_log(device_log)
+                            testcase["device_log"] = self.process_log(device_log)
                         else:
-                            json_dict["build_log"] = self.process_log(build_log)
-                    results_dict["test_details"].append(json_dict)
-                else:
-                    for k in instance.results.keys():
-                        json_dict = {"testcase": k,
-                                    "arch": instance.platform.arch,
-                                    "type": instance.testcase.type,
-                                    "platform": p,
-                                    }
-                        if instance.results[k] in ["PASS"]:
-                            json_dict["status"] = "passed"
-                            if instance.handler:
-                                json_dict["execution_time"] =  handler_time
-                            if ram_size:
-                                json_dict["ram_size"] = ram_size
-                            if rom_size:
-                                json_dict["rom_size"] = rom_size
+                            testcase["build_log"] = self.process_log(build_log)
+                    else:
+                        testcase["status"] = "skipped"
+                        testcase["reason"] = instance.reason
+                    testcases.append(testcase)
 
-                        elif instance.results[k] in ['FAIL', 'BLOCK'] or instance.status in ["error", "failed", "timeout"]:
-                            json_dict["status"] = "failed"
-                            json_dict["reason"] = instance.reason
-                            json_dict["execution_time"] =  handler_time
-                            if os.path.exists(handler_log):
-                                json_dict["test_output"] = self.process_log(handler_log)
-                            elif os.path.exists(device_log):
-                                json_dict["device_log"] = self.process_log(device_log)
-                            else:
-                                json_dict["build_log"] = self.process_log(build_log)
-                        else:
-                            json_dict["status"] = "skipped"
-                            json_dict["reason"] = instance.reason
-                        results_dict["test_details"].append(json_dict)
-
-        rowdict["test_suite"].append(results_dict)
+        suites = [ {"testcases": testcases} ]
+        report["testsuites"] = suites
 
         with open(filename, "wt") as json_file:
-            json.dump(rowdict, json_file, indent=4, separators=(',',':'))
+            json.dump(report, json_file, indent=4, separators=(',',':'))
 
     def get_testcase(self, identifier):
         results = []
@@ -3605,6 +3628,7 @@ class CoverageTool:
             logger.error("Unsupported coverage tool specified: {}".format(tool))
             return None
 
+        logger.debug(f"Select {tool} as the coverage tool...")
         return t
 
     @staticmethod
@@ -3690,10 +3714,13 @@ class Lcov(CoverageTool):
     def _generate(self, outdir, coveragelog):
         coveragefile = os.path.join(outdir, "coverage.info")
         ztestfile = os.path.join(outdir, "ztest.info")
-        subprocess.call(["lcov", "--gcov-tool", self.gcov_tool,
+        cmd = ["lcov", "--gcov-tool", self.gcov_tool,
                          "--capture", "--directory", outdir,
                          "--rc", "lcov_branch_coverage=1",
-                         "--output-file", coveragefile], stdout=coveragelog)
+                         "--output-file", coveragefile]
+        cmd_str = " ".join(cmd)
+        logger.debug(f"Running {cmd_str}...")
+        subprocess.call(cmd, stdout=coveragelog)
         # We want to remove tests/* and tests/ztest/test/* but save tests/ztest
         subprocess.call(["lcov", "--gcov-tool", self.gcov_tool, "--extract",
                          coveragefile,
@@ -3752,10 +3779,12 @@ class Gcovr(CoverageTool):
         excludes = Gcovr._interleave_list("-e", self.ignores)
 
         # We want to remove tests/* and tests/ztest/test/* but save tests/ztest
-        subprocess.call(["gcovr", "-r", self.base_dir, "--gcov-executable",
-                         self.gcov_tool, "-e", "tests/*"] + excludes +
-                        ["--json", "-o", coveragefile, outdir],
-                        stdout=coveragelog)
+        cmd = ["gcovr", "-r", self.base_dir, "--gcov-executable",
+               self.gcov_tool, "-e", "tests/*"] + excludes + ["--json", "-o",
+               coveragefile, outdir]
+        cmd_str = " ".join(cmd)
+        logger.debug(f"Running {cmd_str}...")
+        subprocess.call(cmd, stdout=coveragelog)
 
         subprocess.call(["gcovr", "-r", self.base_dir, "--gcov-executable",
                          self.gcov_tool, "-f", "tests/ztest", "-e",
@@ -3904,6 +3933,7 @@ class HardwareMap:
             runner = dut.get('runner')
             serial = dut.get('serial')
             product = dut.get('product')
+            fixtures = dut.get('fixtures', [])
             new_dut = DUT(platform=platform,
                           product=product,
                           runner=runner,
@@ -3913,6 +3943,7 @@ class HardwareMap:
                           pre_script=pre_script,
                           post_script=post_script,
                           post_flash_script=post_flash_script)
+            new_dut.fixtures = fixtures
             new_dut.counter = 0
             self.duts.append(new_dut)
 

@@ -100,8 +100,7 @@ static int i2s_stm32_enable_clock(const struct device *dev)
 	const struct device *clk;
 	int ret;
 
-	clk = device_get_binding(STM32_CLOCK_CONTROL_NAME);
-	__ASSERT_NO_MSG(clk);
+	clk = DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE);
 
 	ret = clock_control_on(clk, (clock_control_subsys_t *) &cfg->pclken);
 	if (ret != 0) {
@@ -898,8 +897,6 @@ static const struct device *get_dev_from_tx_dma_channel(uint32_t dma_channel)
 }
 
 #define I2S_INIT(index, clk_sel)					\
-DEVICE_DT_DECLARE(DT_NODELABEL(i2s##index));				\
-									\
 static const struct soc_gpio_pinctrl i2s_pins_##index[] =		\
 				     ST_STM32_DT_INST_PINCTRL(index, 0);\
 									\

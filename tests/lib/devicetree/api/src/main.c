@@ -62,6 +62,8 @@ static void test_path_props(void)
 	zassert_equal(DT_PROP(TEST_ABCD1234, ngpios), 32, "");
 	zassert_true(!strcmp(DT_PROP(TEST_ABCD1234, status), "okay"), "");
 	zassert_equal(DT_PROP_LEN(TEST_ABCD1234, compatible), 1, "");
+	zassert_equal(DT_PROP_LEN_OR(TEST_ABCD1234, compatible, 4), 1, "");
+	zassert_equal(DT_PROP_LEN_OR(TEST_ABCD1234, invalid_property, 0), 0, "");
 	zassert_true(!strcmp(DT_PROP_BY_IDX(TEST_ABCD1234, compatible, 0),
 			     "vnd,gpio"), "");
 }
@@ -1268,6 +1270,18 @@ static void test_enums_required_false(void)
 #define DT_DRV_COMPAT vnd_adc_temp_sensor
 static void test_clocks(void)
 {
+	/* DT_CLOCKS_CTLR_BY_IDX */
+	zassert_true(DT_SAME_NODE(DT_CLOCKS_CTLR_BY_IDX(TEST_TEMP, 1),
+				  DT_NODELABEL(test_fixed_clk)), "");
+
+	/* DT_CLOCKS_CTLR */
+	zassert_true(DT_SAME_NODE(DT_CLOCKS_CTLR(TEST_TEMP),
+				  DT_NODELABEL(test_clk)), "");
+
+	/* DT_CLOCKS_CTLR_BY_NAME */
+	zassert_true(DT_SAME_NODE(DT_CLOCKS_CTLR_BY_NAME(TEST_TEMP, clk_b),
+				  DT_NODELABEL(test_clk)), "");
+
 	/* DT_CLOCKS_LABEL_BY_IDX */
 	zassert_true(!strcmp(DT_CLOCKS_LABEL_BY_IDX(TEST_TEMP, 0),
 			     "TEST_CLOCK"), "");
@@ -1298,6 +1312,18 @@ static void test_clocks(void)
 
 	/* DT_INST */
 	zassert_equal(DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT), 1, "");
+
+	/* DT_INST_CLOCKS_CTLR_BY_IDX */
+	zassert_true(DT_SAME_NODE(DT_INST_CLOCKS_CTLR_BY_IDX(0, 1),
+				  DT_NODELABEL(test_fixed_clk)), "");
+
+	/* DT_INST_CLOCKS_CTLR */
+	zassert_true(DT_SAME_NODE(DT_INST_CLOCKS_CTLR(0),
+				  DT_NODELABEL(test_clk)), "");
+
+	/* DT_INST_CLOCKS_CTLR_BY_NAME */
+	zassert_true(DT_SAME_NODE(DT_INST_CLOCKS_CTLR_BY_NAME(0, clk_b),
+				  DT_NODELABEL(test_clk)), "");
 
 	/* DT_INST_CLOCKS_LABEL_BY_IDX */
 	zassert_true(!strcmp(DT_INST_CLOCKS_LABEL_BY_IDX(0, 0),
@@ -1536,6 +1562,19 @@ static void test_dep_ord(void)
 	}
 }
 
+static void test_path(void)
+{
+	zassert_true(!strcmp(DT_NODE_PATH(DT_ROOT), "/"), "");
+	zassert_true(!strcmp(DT_NODE_PATH(TEST_DEADBEEF),
+			     "/test/gpio@deadbeef"), "");
+}
+
+static void test_same_node(void)
+{
+	zassert_true(DT_SAME_NODE(TEST_DEADBEEF, TEST_DEADBEEF), "");
+	zassert_false(DT_SAME_NODE(TEST_DEADBEEF, TEST_ABCD1234), "");
+}
+
 void test_main(void)
 {
 	ztest_test_suite(devicetree_api,
@@ -1569,7 +1608,9 @@ void test_main(void)
 			 ztest_unit_test(test_parent),
 			 ztest_unit_test(test_child_nodes_list),
 			 ztest_unit_test(test_great_grandchild),
-			 ztest_unit_test(test_dep_ord)
+			 ztest_unit_test(test_dep_ord),
+			 ztest_unit_test(test_path),
+			 ztest_unit_test(test_same_node)
 		);
 	ztest_run_test_suite(devicetree_api);
 }

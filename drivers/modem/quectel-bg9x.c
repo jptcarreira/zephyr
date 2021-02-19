@@ -135,7 +135,7 @@ static int on_cmd_sockread_common(int socket_fd,
 	struct modem_socket	 *sock = NULL;
 	struct socket_read_data	 *sock_data;
 	int ret, i;
-	int socket_data_length = find_len(data->rx_buf->data);
+	int socket_data_length;
 	int bytes_to_skip;
 
 	if (!len) {
@@ -148,6 +148,8 @@ static int on_cmd_sockread_common(int socket_fd,
 		LOG_ERR("Incorrect format! Ignoring data!");
 		return -EINVAL;
 	}
+
+	socket_data_length = find_len(data->rx_buf->data);
 
 	/* No (or not enough) data available on the socket. */
 	bytes_to_skip = digits(socket_data_length) + 2 + 4;
@@ -556,7 +558,7 @@ static ssize_t offload_sendto(void *obj, const void *buf, size_t len,
 	}
 
 	/* UDP is not supported. */
-	if (sock->ip_proto != IPPROTO_UDP) {
+	if (sock->ip_proto == IPPROTO_UDP) {
 		errno = ENOTSUP;
 		return -1;
 	}
@@ -747,7 +749,7 @@ static int offload_connect(void *obj, const struct sockaddr *addr,
 	}
 
 	/* UDP is not supported. */
-	if (sock->ip_proto != IPPROTO_UDP) {
+	if (sock->ip_proto == IPPROTO_UDP) {
 		errno = ENOTSUP;
 		return -1;
 	}
@@ -906,6 +908,12 @@ static void modem_rssi_query_work(struct k_work *work)
 static void pin_init(void)
 {
 	LOG_INF("Setting Modem Pins");
+
+#if DT_INST_NODE_HAS_PROP(0, mdm_wdisable_gpios)
+	LOG_INF("Deactivate W Disable");
+	modem_pin_write(&mctx, MDM_WDISABLE, 0);
+	k_sleep(K_MSEC(250));
+#endif
 
 	/* NOTE: Per the BG95 document, the Reset pin is internally connected to the
 	 * Power key pin.
@@ -1173,10 +1181,10 @@ error:
 }
 
 /* Register the device with the Networking stack. */
-NET_DEVICE_OFFLOAD_INIT(modem_gb9x, DT_INST_LABEL(0),
-			modem_init, device_pm_control_nop, &mdata, NULL,
-			CONFIG_MODEM_QUECTEL_BG9X_INIT_PRIORITY, &api_funcs,
-			MDM_MAX_DATA_LENGTH);
+NET_DEVICE_DT_INST_OFFLOAD_DEFINE(0, modem_init, device_pm_control_nop,
+				  &mdata, NULL,
+				  CONFIG_MODEM_QUECTEL_BG9X_INIT_PRIORITY,
+				  &api_funcs, MDM_MAX_DATA_LENGTH);
 
 /* Register NET sockets. */
 NET_SOCKET_REGISTER(quectel_bg9x, AF_UNSPEC, offload_is_supported, offload_socket);

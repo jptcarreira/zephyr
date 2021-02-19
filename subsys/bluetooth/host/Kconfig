@@ -163,8 +163,6 @@ config BT_DRIVER_RX_HIGH_PRIO
 
 if BT_HCI_HOST
 
-source "subsys/bluetooth/host/audio/Kconfig"
-
 config BT_HOST_CRYPTO
 	# Hidden option that compiles in random number generation and AES
 	# encryption support using TinyCrypt library if this is not provided
@@ -328,6 +326,7 @@ config BT_SMP
 	select TINYCRYPT_AES
 	select TINYCRYPT_AES_CMAC
 	select BT_RPA
+	select BT_ECC
 	help
 	  This option enables support for the Security Manager Protocol
 	  (SMP), making it possible to pair devices over LE.
@@ -430,7 +429,6 @@ config BT_FIXED_PASSKEY
 
 config BT_USE_DEBUG_KEYS
 	bool "Enable Security Manager Debug Mode"
-	depends on BT_TINYCRYPT_ECC
 	help
 	  This option places Security Manager in a Debug Mode. In this mode
 	  predefined Diffie-Hellman private/public key pair is used as described
@@ -608,6 +606,12 @@ config BT_DF
 	  It will allow to: get information about antennae, configure
 	  Constant Tone Extension, transmit CTE and sample incoming CTE.
 
+config BT_DEBUG_DF
+	bool "Bluetooth Direction Finding debug"
+	depends on BT_DF
+	help
+	  This option enables debug support for Bluetooth Direction Finding
+
 endif # BT_HCI_HOST
 
 config BT_ECC
@@ -660,6 +664,12 @@ config BT_DEBUG_CONN
 	help
 	  This option enables debug support for Bluetooth
 	  connection handling.
+
+config BT_DEBUG_ISO
+	bool "ISO channel debug"
+	help
+	  Use this option to enable ISO channels debug logs for the
+	  Bluetooth Audio functionality.
 
 config BT_DEBUG_KEYS
 	bool "Bluetooth security keys debug"

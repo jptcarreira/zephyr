@@ -8,7 +8,9 @@
 #define ZEPHYR_INCLUDE_POWER_POWER_H_
 
 #include <zephyr/types.h>
+#include <sys/slist.h>
 #include <power/power_state.h>
+#include <toolchain.h>
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -20,38 +22,6 @@ extern "C" {
  * @{
  * @}
  */
-
-/**
- * @brief System power states.
- */
-enum power_states {
-	POWER_STATE_AUTO	= (-2),
-	POWER_STATE_ACTIVE	= (-1),
-#ifdef CONFIG_PM_SLEEP_STATES
-# ifdef CONFIG_HAS_POWER_STATE_SLEEP_1
-	POWER_STATE_SLEEP_1,
-# endif
-# ifdef CONFIG_HAS_POWER_STATE_SLEEP_2
-	POWER_STATE_SLEEP_2,
-# endif
-# ifdef CONFIG_HAS_POWER_STATE_SLEEP_3
-	POWER_STATE_SLEEP_3,
-# endif
-#endif /* CONFIG_PM_SLEEP_STATES */
-
-#ifdef CONFIG_PM_DEEP_SLEEP_STATES
-# ifdef CONFIG_HAS_POWER_STATE_DEEP_SLEEP_1
-	POWER_STATE_DEEP_SLEEP_1,
-# endif
-# ifdef CONFIG_HAS_POWER_STATE_DEEP_SLEEP_2
-	POWER_STATE_DEEP_SLEEP_2,
-# endif
-# ifdef CONFIG_HAS_POWER_STATE_DEEP_SLEEP_3
-	POWER_STATE_DEEP_SLEEP_3,
-# endif
-#endif /* CONFIG_PM_DEEP_SLEEP_STATES */
-	POWER_STATE_MAX
-};
 
 #ifdef CONFIG_PM
 
@@ -66,29 +36,49 @@ extern unsigned char pm_idle_exit_notify;
  */
 
 /**
+ * Power management notifier struct
+ *
+ * This struct contains callbacks that are called when the target enters and
+ * exits power states.
+ *
+ * As currently implemented the entry callback is invoked when
+ * transitioning from PM_STATE_ACTIVE to another state, and the exit
+ * callback is invoked when transitioning from a non-active state to
+ * PM_STATE_ACTIVE. This behavior may change in the future.
+ *
+ * @note These callbacks can be called from the ISR of the event
+ *       that caused the kernel exit from idling.
+ */
+struct pm_notifier {
+	sys_snode_t _node;
+	/**
+	 * Application defined function for doing any target specific operations
+	 * for power state entry.
+	 */
+	void (*state_entry)(enum pm_state state);
+	/**
+	 * Application defined function for doing any target specific operations
+	 * for power state exit.
+	 */
+	void (*state_exit)(enum pm_state state);
+};
+
+/**
  * @brief Check if particular power state is a sleep state.
  *
  * This function returns true if given power state is a sleep state.
  */
-static inline bool pm_is_sleep_state(enum power_states state)
+static inline bool pm_is_sleep_state(enum pm_state state)
 {
 	bool ret = true;
 
 	switch (state) {
-#ifdef CONFIG_PM_SLEEP_STATES
-# ifdef CONFIG_HAS_POWER_STATE_SLEEP_1
-	case POWER_STATE_SLEEP_1:
+	case PM_STATE_RUNTIME_IDLE:
+		__fallthrough;
+	case PM_STATE_SUSPEND_TO_IDLE:
+		__fallthrough;
+	case PM_STATE_STANDBY:
 		break;
-# endif
-# ifdef CONFIG_HAS_POWER_STATE_SLEEP_2
-	case POWER_STATE_SLEEP_2:
-		break;
-# endif
-# ifdef CONFIG_HAS_POWER_STATE_SLEEP_3
-	case POWER_STATE_SLEEP_3:
-		break;
-# endif
-#endif /* CONFIG_PM_SLEEP_STATES */
 	default:
 		ret = false;
 		break;
@@ -102,26 +92,15 @@ static inline bool pm_is_sleep_state(enum power_states state)
  *
  * This function returns true if given power state is a deep sleep state.
  */
-static inline bool pm_is_deep_sleep_state(enum power_states state)
+static inline bool pm_is_deep_sleep_state(enum pm_state state)
 {
 	bool ret = true;
 
 	switch (state) {
-#ifdef CONFIG_PM_DEEP_SLEEP_STATES
-# ifdef CONFIG_HAS_POWER_STATE_DEEP_SLEEP_1
-	case POWER_STATE_DEEP_SLEEP_1:
+	case PM_STATE_SUSPEND_TO_RAM:
+		__fallthrough;
+	case PM_STATE_SUSPEND_TO_DISK:
 		break;
-# endif
-# ifdef CONFIG_HAS_POWER_STATE_DEEP_SLEEP_2
-	case POWER_STATE_DEEP_SLEEP_2:
-		break;
-# endif
-# ifdef CONFIG_HAS_POWER_STATE_DEEP_SLEEP_3
-	case POWER_STATE_DEEP_SLEEP_3:
-		break;
-# endif
-#endif /* CONFIG_PM_DEEP_SLEEP_STATES */
-
 	default:
 		ret = false;
 		break;
@@ -155,18 +134,21 @@ static inline void pm_idle_exit_notification_disable(void)
  * If enabled PM_DIRECT_FORCE_MODE, this function can only
  * run in thread context.
  *
- * @param state Power state which should be used in the ongoing
- *		suspend operation or POWER_STATE_AUTO.
+ * @param info Power state which should be used in the ongoing
+ *	suspend operation.
  */
-void pm_power_state_force(enum power_states state);
+void pm_power_state_force(struct pm_state_info info);
 
 /**
  * @brief Put processor into a power state.
  *
  * This function implements the SoC specific details necessary
  * to put the processor into available power states.
+ *
+ * @param info Power state which should be used in the ongoing
+ *	suspend operation.
  */
-void pm_power_state_set(enum power_states state);
+void pm_power_state_set(struct pm_state_info info);
 
 #ifdef CONFIG_PM_DEBUG
 /**
@@ -178,31 +160,34 @@ void pm_dump_debug_info(void);
 
 #endif /* CONFIG_PM_DEBUG */
 
-#ifdef CONFIG_PM_STATE_LOCK
 /**
- * @brief Disable particular power state
+ * @brief Set a constraint for a power state
  *
  * @details Disabled state cannot be selected by the Zephyr power
  *	    management policies. Application defined policy should
- *	    use the @ref pm_ctrl_is_state_enabled function to
- *	    check if given state could is enabled and could be used.
+ *	    use the @ref pm_constraint_get function to
+ *	    check if given state is enabled and could be used.
+ *
+ * @note This API is refcount
  *
  * @param [in] state Power state to be disabled.
  */
-void pm_ctrl_disable_state(enum power_states state);
+void pm_constraint_set(enum pm_state state);
 
 /**
- * @brief Enable particular power state
+ * @brief Release a constraint for a power state
  *
  * @details Enabled state can be selected by the Zephyr power
  *	    management policies. Application defined policy should
- *	    use the @ref pm_ctrl_is_state_enabled function to
- *	    check if given state could is enabled and could be used.
+ *	    use the @ref pm_constraint_get function to
+ *	    check if given state is enabled and could be used.
  *	    By default all power states are enabled.
+ *
+ * @note This API is refcount
  *
  * @param [in] state Power state to be enabled.
  */
-void pm_ctrl_enable_state(enum power_states state);
+void pm_constraint_release(enum pm_state state);
 
 /**
  * @brief Check if particular power state is enabled
@@ -211,9 +196,8 @@ void pm_ctrl_enable_state(enum power_states state);
  *
  * @param [in] state Power state.
  */
-bool pm_ctrl_is_state_enabled(enum power_states state);
+bool pm_constraint_get(enum pm_state state);
 
-#endif /* CONFIG_PM_STATE_LOCK */
 
 /**
  * @}
@@ -286,7 +270,7 @@ void pm_system_resume(void);
  * @return Power state which was entered or POWER_STATE_ACTIVE if SoC was
  *         kept in the active state.
  */
-enum power_states pm_system_suspend(int32_t ticks);
+enum pm_state pm_system_suspend(int32_t ticks);
 
 /**
  * @brief Do any SoC or architecture specific post ops after sleep state exits.
@@ -296,23 +280,30 @@ enum power_states pm_system_suspend(int32_t ticks);
  * interrupts after resuming from sleep state. In future, the enabling
  * of interrupts may be moved into the kernel.
  */
-void _pm_power_state_exit_post_ops(enum power_states state);
+void pm_power_state_exit_post_ops(struct pm_state_info info);
 
 /**
- * @brief Application defined function for power state entry
+ * @brief Register a power management notifier
  *
- * Application defined function for doing any target specific operations
- * for power state entry.
+ * Register the given notifier from the power management notification
+ * list.
+ *
+ * @param notifier pm_notifier object to be registered.
  */
-void pm_notify_power_state_entry(enum power_states state);
+void pm_notifier_register(struct pm_notifier *notifier);
 
 /**
- * @brief Application defined function for sleep state exit
+ * @brief Unregister a power management notifier
  *
- * Application defined function for doing any target specific operations
- * for sleep state exit.
+ * Remove the given notifier from the power management notification
+ * list. After that this object callbacks will not be called.
+ *
+ * @param notifier pm_notifier object to be unregistered.
+ *
+ * @return 0 if the notifier was successfully removed, a negative value
+ * otherwise.
  */
-void pm_notify_power_state_exit(enum power_states state);
+int pm_notifier_unregister(struct pm_notifier *notifier);
 
 /**
  * @}

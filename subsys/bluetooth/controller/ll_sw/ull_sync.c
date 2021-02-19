@@ -52,7 +52,7 @@ static void ticker_update_sync_op_cb(uint32_t status, void *param);
 static void ticker_stop_op_cb(uint32_t status, void *param);
 static void sync_lost(void *param);
 
-static struct ll_sync_set ll_sync_pool[CONFIG_BT_CTLR_SCAN_SYNC_SET];
+static struct ll_sync_set ll_sync_pool[CONFIG_BT_PER_ADV_SYNC_MAX];
 static void *sync_free;
 
 uint8_t ll_sync_create(uint8_t options, uint8_t sid, uint8_t adv_addr_type,
@@ -108,9 +108,9 @@ uint8_t ll_sync_create(uint8_t options, uint8_t sid, uint8_t adv_addr_type,
 		return BT_HCI_ERR_MEM_CAPACITY_EXCEEDED;
 	}
 
-	scan->per_scan.state = LL_SYNC_STATE_IDLE;
 	node_rx->link = link_sync_estab;
 	scan->per_scan.node_rx_estab = node_rx;
+	scan->per_scan.state = LL_SYNC_STATE_IDLE;
 	scan->per_scan.filter_policy = options & BIT(0);
 	if (IS_ENABLED(CONFIG_BT_CTLR_PHY_CODED)) {
 		scan_coded->per_scan.state = LL_SYNC_STATE_IDLE;
@@ -142,6 +142,13 @@ uint8_t ll_sync_create(uint8_t options, uint8_t sid, uint8_t adv_addr_type,
 	/* Initialize sync context */
 	sync->timeout_reload = 0U;
 	sync->timeout_expire = 0U;
+
+#if defined(CONFIG_BT_CTLR_SYNC_ISO)
+	/* Reset Broadcast Isochronous Group Sync Establishment */
+	sync->iso.sync_iso = NULL;
+#endif /* CONFIG_BT_CTLR_SYNC_ISO */
+
+	/* Initialize sync LLL context */
 	lll_sync = &sync->lll;
 	lll_sync->skip_prepare = 0U;
 	lll_sync->skip_event = 0U;
@@ -150,7 +157,7 @@ uint8_t ll_sync_create(uint8_t options, uint8_t sid, uint8_t adv_addr_type,
 	lll_sync->window_widening_event_us = 0U;
 
 	/* Reporting initially enabled/disabled */
-	lll_sync->is_enabled = options & BIT(1);
+	lll_sync->is_rx_enabled = options & BIT(1);
 
 	/* sync_lost node_rx */
 	sync->node_rx_lost.hdr.link = link_sync_lost;
@@ -190,17 +197,17 @@ uint8_t ll_sync_create_cancel(void **rx)
 		}
 	}
 
-	sync = scan->per_scan.sync;
-	scan->per_scan.sync = NULL;
-	if (IS_ENABLED(CONFIG_BT_CTLR_PHY_CODED)) {
-		scan_coded->per_scan.sync = NULL;
-	}
-
 	/* Check for race condition where in sync is established when sync
 	 * context was set to NULL.
 	 */
+	sync = scan->per_scan.sync;
 	if (!sync || sync->timeout_reload) {
 		return BT_HCI_ERR_CMD_DISALLOWED;
+	}
+
+	scan->per_scan.sync = NULL;
+	if (IS_ENABLED(CONFIG_BT_CTLR_PHY_CODED)) {
+		scan_coded->per_scan.sync = NULL;
 	}
 
 	node_rx = (void *)scan->per_scan.node_rx_estab;
@@ -289,7 +296,7 @@ int ull_sync_reset(void)
 
 struct ll_sync_set *ull_sync_set_get(uint16_t handle)
 {
-	if (handle >= CONFIG_BT_CTLR_SCAN_SYNC_SET) {
+	if (handle >= CONFIG_BT_PER_ADV_SYNC_MAX) {
 		return NULL;
 	}
 
@@ -374,7 +381,7 @@ void ull_sync_setup(struct ll_scan_set *scan, struct ll_scan_aux_set *aux,
 
 	sca = si->sca_chm[4] >> 5;
 	interval = sys_le16_to_cpu(si->interval);
-	interval_us = interval * 1250U;
+	interval_us = interval * CONN_INT_UNIT_US;
 
 	sync->timeout_reload = RADIO_SYNC_EVENTS((sync->timeout * 10U * 1000U),
 						 interval_us);

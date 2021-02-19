@@ -21,7 +21,7 @@ LOG_MODULE_REGISTER(pwrmgmt_test);
 #define TASK_STACK_SIZE           1024ul
 #define PRIORITY                  K_PRIO_COOP(5)
 
-/* Sleep time should be lower than CONFIG_PM_MIN_RESIDENCY_SLEEP_1 */
+/* Sleep time should be lower than SUSPEND_TO_IDLE */
 #define THREAD_A_SLEEP_TIME       100ul
 #define THREAD_B_SLEEP_TIME       1000ul
 
@@ -51,6 +51,10 @@ static bool checks_enabled;
 /* Track entry/exit to sleep */
 struct pm_counter pm_counters[SLP_STATES_SUPPORTED];
 
+static const struct pm_state_info residency_info[] =
+	PM_STATE_INFO_DT_ITEMS_LIST(DT_NODELABEL(cpu0));
+static size_t residency_info_len = PM_STATE_DT_ITEMS_LEN(DT_NODELABEL(cpu0));
+
 static void pm_latency_check(void)
 {
 	int64_t latency;
@@ -68,8 +72,7 @@ static void pm_latency_check(void)
 			"Sleep entry latency is higher than expected");
 }
 
-/* Hooks to count entry/exit */
-void pm_notify_power_state_entry(enum power_states state)
+static void notify_pm_state_entry(enum pm_state state)
 {
 	if (!checks_enabled) {
 		return;
@@ -84,7 +87,7 @@ void pm_notify_power_state_entry(enum power_states state)
 	}
 }
 
-void pm_notify_power_state_exit(enum power_states state)
+static void notify_pm_state_exit(enum pm_state state)
 {
 	if (!checks_enabled) {
 		return;
@@ -96,6 +99,11 @@ void pm_notify_power_state_exit(enum power_states state)
 		pm_counters[1].exit_cnt++;
 	}
 }
+
+static struct pm_notifier notifier = {
+	.state_entry = notify_pm_state_entry,
+	.state_exit = notify_pm_state_exit,
+};
 
 static void pm_check_counters(uint8_t cycles)
 {
@@ -218,6 +226,7 @@ int test_pwr_mgmt_multithread(uint8_t cycles)
 {
 	uint8_t iterations = cycles;
 
+	pm_notifier_register(&notifier);
 	create_tasks();
 
 	LOG_INF("PM multi-thread test started for cycles: %d", cycles);
@@ -230,7 +239,7 @@ int test_pwr_mgmt_multithread(uint8_t cycles)
 		suspend_all_tasks();
 		LOG_INF("About to enter light sleep");
 		pm_trigger_marker();
-		k_msleep(CONFIG_PM_MIN_RESIDENCY_SLEEP_1 +
+		k_msleep((residency_info[0].min_residency_us / 1000U) +
 			 LT_EXTRA_SLP_TIME);
 
 		LOG_INF("Wake from Light Sleep");
@@ -247,8 +256,9 @@ int test_pwr_mgmt_multithread(uint8_t cycles)
 		LOG_INF("About to enter deep sleep");
 
 		pm_trigger_marker();
-		k_msleep(CONFIG_PM_MIN_RESIDENCY_DEEP_SLEEP_1 +
-			 DP_EXTRA_SLP_TIME);
+		k_msleep(
+		   (residency_info[residency_info_len - 1].min_residency_us /
+		    1000U) + DP_EXTRA_SLP_TIME);
 
 		LOG_INF("Wake from Deep Sleep");
 		pm_exit_marker();
@@ -257,6 +267,7 @@ int test_pwr_mgmt_multithread(uint8_t cycles)
 	}
 
 	destroy_tasks();
+	pm_notifier_unregister(&notifier);
 
 	LOG_INF("PM multi-thread completed");
 	pm_check_counters(cycles);
@@ -271,13 +282,14 @@ int test_pwr_mgmt_singlethread(uint8_t cycles)
 
 	LOG_INF("PM single-thread test started for cycles: %d", cycles);
 
+	pm_notifier_register(&notifier);
 	checks_enabled = true;
 	while (iterations-- > 0) {
 
 		/* Trigger Light Sleep 1 state. 48MHz PLL stays on */
 		LOG_INF("About to enter light sleep");
 		pm_trigger_marker();
-		k_msleep(CONFIG_PM_MIN_RESIDENCY_SLEEP_1 +
+		k_msleep((residency_info[0].min_residency_us / 1000U) +
 			 LT_EXTRA_SLP_TIME);
 		LOG_INF("Wake from Light Sleep");
 		pm_exit_marker();
@@ -289,13 +301,14 @@ int test_pwr_mgmt_singlethread(uint8_t cycles)
 		LOG_INF("About to enter deep Sleep");
 
 		pm_trigger_marker();
-		k_msleep(CONFIG_PM_MIN_RESIDENCY_DEEP_SLEEP_1 +
-			 DP_EXTRA_SLP_TIME);
-
+		k_msleep(
+		   (residency_info[residency_info_len - 1].min_residency_us /
+		    1000U) + DP_EXTRA_SLP_TIME);
 		LOG_INF("Wake from Deep Sleep");
 		pm_exit_marker();
 	}
 
+	pm_notifier_unregister(&notifier);
 	LOG_INF("PM single-thread completed");
 	pm_check_counters(cycles);
 	pm_reset_counters();
@@ -313,15 +326,16 @@ int test_dummy_init(void)
 	while (iterations-- > 0) {
 		LOG_INF("About to enter light sleep");
 		pm_trigger_marker();
-		k_msleep(CONFIG_PM_MIN_RESIDENCY_SLEEP_1 +
+		k_msleep((residency_info[0].min_residency_us / 1000U) +
 			 LT_EXTRA_SLP_TIME);
 		LOG_INF("Wake from Light Sleep");
 		pm_exit_marker();
 
 		LOG_INF("About to enter deep Sleep");
 		pm_trigger_marker();
-		k_msleep(CONFIG_PM_MIN_RESIDENCY_DEEP_SLEEP_1 +
-			 DP_EXTRA_SLP_TIME);
+		k_msleep(
+		   (residency_info[residency_info_len - 1].min_residency_us /
+		    1000U) + DP_EXTRA_SLP_TIME);
 		LOG_INF("Wake from Deep Sleep");
 		pm_exit_marker();
 	}

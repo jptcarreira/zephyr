@@ -16,6 +16,15 @@
 
 #define EVENT_PIPELINE_MAX 7
 #define EVENT_DONE_MAX 3
+#if defined(CONFIG_BT_CTLR_LOW_LAT_ULL)
+#define EVENT_DONE_LINK_CNT 0
+#else
+#define EVENT_DONE_LINK_CNT 1
+#endif /* CONFIG_BT_CTLR_LOW_LAT_ULL */
+
+#define ADV_INT_UNIT_US  625U
+#define SCAN_INT_UNIT_US 625U
+#define CONN_INT_UNIT_US 1250U
 
 #define HDR_ULL(p)     ((void *)((uint8_t *)(p) + sizeof(struct evt_hdr)))
 #define HDR_ULL2LLL(p) ((struct lll_hdr *)((uint8_t *)(p) + \
@@ -78,11 +87,11 @@ enum {
 #if defined(CONFIG_BT_CTLR_SYNC_PERIODIC)
 	TICKER_ID_SCAN_SYNC_BASE,
 	TICKER_ID_SCAN_SYNC_LAST = ((TICKER_ID_SCAN_SYNC_BASE) +
-				    (CONFIG_BT_CTLR_SCAN_SYNC_SET) - 1),
+				    (CONFIG_BT_PER_ADV_SYNC_MAX) - 1),
 #if defined(CONFIG_BT_CTLR_SYNC_ISO)
 	TICKER_ID_SCAN_SYNC_ISO_BASE,
 	TICKER_ID_SCAN_SYNC_ISO_LAST = ((TICKER_ID_SCAN_SYNC_ISO_BASE) +
-					(CONFIG_BT_CTLR_SCAN_SYNC_ISO_MAX) - 1),
+					(CONFIG_BT_CTLR_SCAN_SYNC_ISO_SET) - 1),
 #endif /* CONFIG_BT_CTLR_SYNC_ISO */
 #endif /* CONFIG_BT_CTLR_ADV_PERIODIC */
 #endif /* CONFIG_BT_CTLR_ADV_EXT */
@@ -171,6 +180,8 @@ enum node_rx_type {
 	NODE_RX_TYPE_EVENT_DONE,
 	/* Signals arrival of RX Data Channel payload */
 	NODE_RX_TYPE_DC_PDU,
+	/* Signals arrival of isochronous payload */
+	NODE_RX_TYPE_ISO_PDU,
 	/* Advertisement report from scanning */
 	NODE_RX_TYPE_REPORT,
 	NODE_RX_TYPE_EXT_1M_REPORT,
@@ -237,6 +248,12 @@ struct node_rx_ftr {
 #endif /* CONFIG_BT_HCI_MESH_EXT */
 };
 
+/* Meta-information for isochronous PDUs in node_rx_hdr */
+struct node_rx_iso_meta {
+	uint64_t payload_number : 39; /* cisPayloadNumber */
+	uint32_t timestamp;           /* Time of reception */
+	uint8_t  status;              /* Status of reception (OK/not OK) */
+};
 
 /* Header of node_rx_pdu */
 struct node_rx_hdr {
@@ -251,10 +268,15 @@ struct node_rx_hdr {
 	uint16_t          handle;    /* State/Role instance handle */
 
 	union {
+		struct node_rx_ftr rx_ftr;
+#if defined(CONFIG_BT_CTLR_SYNC_ISO) || \
+	defined(BT_CTLR_PERIPHERAL_ISO) || \
+	defined(BT_CTLR_CENTRAL_ISO)
+		struct node_rx_iso_meta rx_iso_meta;
+#endif
 #if defined(CONFIG_BT_CTLR_RX_PDU_META)
 		lll_rx_pdu_meta_t  rx_pdu_meta;
 #endif /* CONFIG_BT_CTLR_RX_PDU_META */
-		struct node_rx_ftr rx_ftr;
 	};
 };
 
@@ -376,7 +398,12 @@ void *ull_prepare_dequeue_iter(uint8_t *idx);
 void *ull_pdu_rx_alloc_peek(uint8_t count);
 void *ull_pdu_rx_alloc_peek_iter(uint8_t *idx);
 void *ull_pdu_rx_alloc(void);
+void *ull_iso_pdu_rx_alloc_peek(uint8_t count);
+void *ull_iso_pdu_rx_alloc_peek_iter(uint8_t *idx);
+void *ull_iso_pdu_rx_alloc(void);
 void ull_rx_put(memq_link_t *link, void *rx);
+void ull_rx_put_done(memq_link_t *link, void *done);
 void ull_rx_sched(void);
+void ull_rx_sched_done(void);
 void *ull_event_done_extra_get(void);
 void *ull_event_done(void *param);

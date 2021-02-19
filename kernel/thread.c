@@ -407,10 +407,6 @@ static void schedule_new_thread(struct k_thread *thread, k_timeout_t delay)
 	if (K_TIMEOUT_EQ(delay, K_NO_WAIT)) {
 		k_thread_start(thread);
 	} else {
-#ifdef CONFIG_LEGACY_TIMEOUT_API
-		delay = _TICK_ALIGN + k_ms_to_ticks_ceil32(delay);
-#endif
-
 		z_add_thread_timeout(thread, delay);
 	}
 #else
@@ -571,7 +567,7 @@ char *z_setup_new_thread(struct k_thread *new_thread,
 	z_init_thread_base(&new_thread->base, prio, _THREAD_PRESTART, options);
 	stack_ptr = setup_thread_stack(new_thread, stack, stack_size);
 
-#ifdef KERNEL_COHERENCE
+#ifdef CONFIG_KERNEL_COHERENCE
 	/* Check that the thread object is safe, but that the stack is
 	 * still cached!
 	 */
@@ -887,6 +883,14 @@ void z_spin_lock_set_owner(struct k_spinlock *l)
 {
 	l->thread_cpu = _current_cpu->id | (uintptr_t)_current;
 }
+
+#ifdef CONFIG_KERNEL_COHERENCE
+bool z_spin_lock_mem_coherent(struct k_spinlock *l)
+{
+	return arch_mem_coherent((void *)l);
+}
+#endif /* CONFIG_KERNEL_COHERENCE */
+
 #endif /* CONFIG_SPIN_VALIDATE */
 
 int z_impl_k_float_disable(struct k_thread *thread)
@@ -1010,7 +1014,7 @@ int z_vrfy_k_thread_stack_space_get(const struct k_thread *thread,
 
 #ifdef CONFIG_USERSPACE
 static inline k_ticks_t z_vrfy_k_thread_timeout_remaining_ticks(
-						    struct k_thread *t)
+						    const struct k_thread *t)
 {
 	Z_OOPS(Z_SYSCALL_OBJ(t, K_OBJ_THREAD));
 	return z_impl_k_thread_timeout_remaining_ticks(t);
@@ -1018,7 +1022,7 @@ static inline k_ticks_t z_vrfy_k_thread_timeout_remaining_ticks(
 #include <syscalls/k_thread_timeout_remaining_ticks_mrsh.c>
 
 static inline k_ticks_t z_vrfy_k_thread_timeout_expires_ticks(
-						  struct k_thread *t)
+						  const struct k_thread *t)
 {
 	Z_OOPS(Z_SYSCALL_OBJ(t, K_OBJ_THREAD));
 	return z_impl_k_thread_timeout_expires_ticks(t);

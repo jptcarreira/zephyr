@@ -33,6 +33,7 @@
 			label = "User D7 green";
 		};
 	};
+
 };
 
 /* Overwirte default device properties with overlays in board dt file here. */

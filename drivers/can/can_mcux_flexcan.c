@@ -35,6 +35,14 @@ LOG_MODULE_REGISTER(can_mcux_flexcan);
 #error You must either set a sampling-point or timings (phase-seg* and prop-seg)
 #endif
 
+#if ((defined(FSL_FEATURE_FLEXCAN_HAS_ERRATA_5641) && FSL_FEATURE_FLEXCAN_HAS_ERRATA_5641) || \
+	(defined(FSL_FEATURE_FLEXCAN_HAS_ERRATA_5829) && FSL_FEATURE_FLEXCAN_HAS_ERRATA_5829))
+/* the first valid MB should be occupied by ERRATA 5461 or 5829. */
+#define RX_START_IDX 1
+#else
+#define RX_START_IDX 0
+#endif
+
 /*
  * RX message buffers (filters) will take up the first N message
  * buffers. The rest are available for TX use.
@@ -69,7 +77,7 @@ LOG_MODULE_REGISTER(can_mcux_flexcan);
 
 struct mcux_flexcan_config {
 	CAN_Type *base;
-	char *clock_name;
+	const struct device *clock_dev;
 	clock_control_subsys_t clock_subsys;
 	int clk_source;
 	uint32_t bitrate;
@@ -109,20 +117,14 @@ struct mcux_flexcan_data {
 	struct mcux_flexcan_tx_callback tx_cbs[MCUX_FLEXCAN_MAX_TX];
 	enum can_state state;
 	can_state_change_isr_t state_change_isr;
-	flexcan_timing_config_t timing;
+	struct can_timing timing;
 };
 
 static int mcux_flexcan_get_core_clock(const struct device *dev, uint32_t *rate)
 {
 	const struct mcux_flexcan_config *config = dev->config;
-	const struct device *clock_dev;
 
-	clock_dev = device_get_binding(config->clock_name);
-	if (clock_dev == NULL) {
-		return -EIO;
-	}
-
-	return clock_control_get_rate(clock_dev, config->clock_subsys, rate);
+	return clock_control_get_rate(config->clock_dev, config->clock_subsys, rate);
 }
 
 static int mcux_flexcan_set_timing(const struct device *dev,
@@ -132,18 +134,21 @@ static int mcux_flexcan_set_timing(const struct device *dev,
 	ARG_UNUSED(timing_data);
 	struct mcux_flexcan_data *data = dev->data;
 	const struct mcux_flexcan_config *config = dev->config;
+	flexcan_timing_config_t timing_tmp;
 
 	if (!timing) {
 		return -EINVAL;
 	}
 
-	data->timing.preDivider = timing->prescaler;
-	data->timing.rJumpwidth = timing->sjw;
-	data->timing.phaseSeg1 = timing->phase_seg1;
-	data->timing.phaseSeg2 = timing->phase_seg2;
-	data->timing.propSeg = timing->prop_seg;
+	data->timing = *timing;
 
-	FLEXCAN_SetTimingConfig(config->base, &data->timing);
+	timing_tmp.preDivider = data->timing.prescaler - 1U;
+	timing_tmp.rJumpwidth = data->timing.sjw - 1U;
+	timing_tmp.phaseSeg1 = data->timing.phase_seg1 - 1U;
+	timing_tmp.phaseSeg2 = data->timing.phase_seg2 - 1U;
+	timing_tmp.propSeg = data->timing.prop_seg - 1U;
+
+	FLEXCAN_SetTimingConfig(config->base, &timing_tmp);
 
 	return 0;
 }
@@ -162,16 +167,17 @@ static int mcux_flexcan_set_mode(const struct device *dev, enum can_mode mode)
 	}
 
 	FLEXCAN_GetDefaultConfig(&flexcan_config);
+	flexcan_config.maxMbNum = FSL_FEATURE_FLEXCAN_HAS_MESSAGE_BUFFER_MAX_NUMBERn(0);
 	flexcan_config.clkSrc = config->clk_source;
 	flexcan_config.baudRate = clock_freq /
-	      (1U + data->timing.propSeg + data->timing.phaseSeg1 +
-	       data->timing.phaseSeg2) / data->timing.preDivider;
+	      (1U + data->timing.prop_seg + data->timing.phase_seg1 +
+	       data->timing.phase_seg2) / data->timing.prescaler;
 	flexcan_config.enableIndividMask = true;
 
-	flexcan_config.timingConfig.rJumpwidth = data->timing.rJumpwidth;
-	flexcan_config.timingConfig.propSeg = data->timing.propSeg;
-	flexcan_config.timingConfig.phaseSeg1 = data->timing.phaseSeg1;
-	flexcan_config.timingConfig.phaseSeg2 = data->timing.phaseSeg2;
+	flexcan_config.timingConfig.rJumpwidth = data->timing.sjw - 1U;
+	flexcan_config.timingConfig.propSeg = data->timing.prop_seg - 1U;
+	flexcan_config.timingConfig.phaseSeg1 = data->timing.phase_seg1 - 1U;
+	flexcan_config.timingConfig.phaseSeg2 = data->timing.phase_seg2 - 1U;
 
 	if (mode == CAN_LOOPBACK_MODE || mode == CAN_SILENT_LOOPBACK_MODE) {
 		flexcan_config.enableLoopBack = true;
@@ -367,7 +373,7 @@ static int mcux_flexcan_attach_isr(const struct device *dev,
 	k_mutex_lock(&data->rx_mutex, K_FOREVER);
 
 	/* Find and allocate RX message buffer */
-	for (i = 0; i < MCUX_FLEXCAN_MAX_RX; i++) {
+	for (i = RX_START_IDX; i < MCUX_FLEXCAN_MAX_RX; i++) {
 		if (!atomic_test_and_set_bit(data->rx_allocs, i)) {
 			alloc = i;
 			break;
@@ -674,7 +680,6 @@ static int mcux_flexcan_init(const struct device *dev)
 {
 	const struct mcux_flexcan_config *config = dev->config;
 	struct mcux_flexcan_data *data = dev->data;
-	struct can_timing timing;
 	int err;
 	int i;
 
@@ -685,32 +690,27 @@ static int mcux_flexcan_init(const struct device *dev)
 		k_sem_init(&data->tx_cbs[i].done, 0, 1);
 	}
 
-	timing.sjw = config->sjw;
+	data->timing.sjw = config->sjw;
 	if (config->sample_point && USE_SP_ALGO) {
-		err = can_calc_timing(dev, &timing, config->bitrate,
+		err = can_calc_timing(dev, &data->timing, config->bitrate,
 				      config->sample_point);
 		if (err == -EINVAL) {
 			LOG_ERR("Can't find timing for given param");
 			return -EIO;
 		}
 		LOG_DBG("Presc: %d, Seg1S1: %d, Seg2: %d",
-			timing.prescaler, timing.phase_seg1, timing.phase_seg2);
+			data->timing.prescaler, data->timing.phase_seg1,
+			data->timing.phase_seg2);
 		LOG_DBG("Sample-point err : %d", err);
 	} else {
-		timing.prop_seg = config->prop_seg;
-		timing.phase_seg1 = config->phase_seg1;
-		timing.phase_seg2 = config->phase_seg2;
-		err = can_calc_prescaler(dev, &timing, config->bitrate);
+		data->timing.prop_seg = config->prop_seg;
+		data->timing.phase_seg1 = config->phase_seg1;
+		data->timing.phase_seg2 = config->phase_seg2;
+		err = can_calc_prescaler(dev, &data->timing, config->bitrate);
 		if (err) {
 			LOG_WRN("Bitrate error: %d", err);
 		}
 	}
-
-	data->timing.preDivider = timing.prescaler;
-	data->timing.rJumpwidth = timing.sjw;
-	data->timing.phaseSeg1 = timing.phase_seg1;
-	data->timing.phaseSeg2 = timing.phase_seg2;
-	data->timing.propSeg = timing.prop_seg;
 
 	err = mcux_flexcan_set_mode(dev, CAN_NORMAL_MODE);
 	if (err) {
@@ -778,7 +778,7 @@ static const struct can_driver_api mcux_flexcan_driver_api = {
 									\
 	static const struct mcux_flexcan_config mcux_flexcan_config_##id = { \
 		.base = (CAN_Type *)DT_INST_REG_ADDR(id),		\
-		.clock_name = DT_INST_CLOCKS_LABEL(id),			\
+		.clock_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(id)),	\
 		.clock_subsys = (clock_control_subsys_t)		\
 			DT_INST_CLOCKS_CELL(id, name),			\
 		.clk_source = DT_INST_PROP(id, clk_source),		\
@@ -814,11 +814,12 @@ static const struct can_driver_api mcux_flexcan_driver_api = {
 DT_INST_FOREACH_STATUS_OKAY(FLEXCAN_DEVICE_INIT_MCUX)
 
 #if defined(CONFIG_NET_SOCKETS_CAN)
-#include "socket_can_generic.h"						\
+#include "socket_can_generic.h"
 #define FLEXCAN_DEVICE_SOCKET_CAN(id)					\
+	static struct socket_can_context socket_can_context_##id;	\
 	static int socket_can_init_##id(const struct device *dev)	\
 	{								\
-		struct device *can_dev = DEVICE_DT_INST_GET(id);	\
+		const struct device *can_dev = DEVICE_DT_INST_GET(id);	\
 		struct socket_can_context *socket_context = dev->data;	\
 		LOG_DBG("Init socket CAN device %p (%s) for dev %p (%s)", \
 			dev, dev->name, can_dev, can_dev->name);	\

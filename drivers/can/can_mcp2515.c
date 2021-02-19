@@ -524,12 +524,12 @@ static int mcp2515_attach_isr(const struct device *dev,
 
 	/* find free filter */
 	while ((BIT(filter_idx) & dev_data->filter_usage)
-	       && (filter_idx < CONFIG_CAN_MCP2515_MAX_FILTER)) {
+	       && (filter_idx < CONFIG_CAN_MAX_FILTER)) {
 		filter_idx++;
 	}
 
 	/* setup filter */
-	if (filter_idx < CONFIG_CAN_MCP2515_MAX_FILTER) {
+	if (filter_idx < CONFIG_CAN_MAX_FILTER) {
 		dev_data->filter_usage |= BIT(filter_idx);
 
 		dev_data->filter[filter_idx] = *filter;
@@ -590,7 +590,7 @@ static void mcp2515_rx_filter(const struct device *dev,
 
 	k_mutex_lock(&dev_data->mutex, K_FOREVER);
 
-	for (; filter_idx < CONFIG_CAN_MCP2515_MAX_FILTER; filter_idx++) {
+	for (; filter_idx < CONFIG_CAN_MAX_FILTER; filter_idx++) {
 		if (!(BIT(filter_idx) & dev_data->filter_usage)) {
 			continue; /* filter slot empty */
 		}
@@ -923,12 +923,12 @@ static int mcp2515_init(const struct device *dev)
 		}
 	}
 
-	ret = can_set_mode(dev, CAN_NORMAL_MODE);
+	ret = can_set_timing(dev, &timing, NULL);
 	if (ret) {
 		return ret;
 	}
 
-	ret = can_set_timing(dev, &timing, NULL);
+	ret = can_set_mode(dev, CAN_NORMAL_MODE);
 
 	return ret;
 }
@@ -976,6 +976,8 @@ DEVICE_DT_INST_DEFINE(0, &mcp2515_init, device_pm_control_nop,
 #if defined(CONFIG_NET_SOCKETS_CAN)
 
 #include "socket_can_generic.h"
+
+static struct socket_can_context socket_can_context_1;
 
 static int socket_can_init(const struct device *dev)
 {
