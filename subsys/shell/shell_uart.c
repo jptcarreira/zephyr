@@ -152,8 +152,8 @@ static void uart_irq_init(const struct shell_uart *sh_uart)
 static void timer_handler(struct k_timer *timer)
 {
 	uint8_t c;
+	uint8_t *data;
 	const struct shell_uart *sh_uart = k_timer_user_data_get(timer);
-
 	while (uart_poll_in(sh_uart->ctrl_blk->dev, &c) == 0) {
 		if (ring_buf_put(sh_uart->rx_ringbuf, &c, 1) == 0U) {
 			/* ring buffer full. */
@@ -162,6 +162,23 @@ static void timer_handler(struct k_timer *timer)
 		sh_uart->ctrl_blk->handler(SHELL_TRANSPORT_EVT_RX_RDY,
 					   sh_uart->ctrl_blk->context);
 	}
+//	size_t len, tx;
+//	if( sh_uart->tx_ringbuf ) {
+//		len = ring_buf_get_claim(sh_uart->tx_ringbuf, (uint8_t **)&data,
+//					 sh_uart->tx_ringbuf->size);
+//
+//		uint8_t *ptr = data;
+//		if (len) {
+//			tx = len;
+//			while( tx ) {
+//				uart_poll_out(sh_uart->ctrl_blk->dev, *data );
+//				ptr++;
+//				tx--;
+//			}
+//		}
+//		ring_buf_get_finish(sh_uart->tx_ringbuf, len - tx );
+//	}
+
 }
 
 static int init(const struct shell_transport *transport,

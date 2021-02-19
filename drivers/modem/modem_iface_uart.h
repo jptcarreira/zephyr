@@ -32,6 +32,8 @@ struct modem_iface_uart_data {
 
 	/* rx semaphore */
 	struct k_sem rx_sem;
+
+	void (*rx_callback)();
 };
 
 /**

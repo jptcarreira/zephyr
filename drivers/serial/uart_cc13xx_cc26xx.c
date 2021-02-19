@@ -53,11 +53,13 @@ static inline const struct uart_device_config *get_dev_conf(const struct device 
 static int uart_cc13xx_cc26xx_poll_in(const struct device *dev,
 				      unsigned char *c)
 {
-	if (!UARTCharsAvail(get_dev_conf(dev)->regs)) {
+	uint32_t regs = get_dev_conf(dev)->regs;
+
+	if (!UARTCharsAvail(regs)) {
 		return -1;
 	}
 
-	*c = UARTCharGetNonBlocking(get_dev_conf(dev)->regs);
+	*c = UARTCharGetNonBlocking(regs);
 
 	return 0;
 }
@@ -65,13 +67,17 @@ static int uart_cc13xx_cc26xx_poll_in(const struct device *dev,
 static void uart_cc13xx_cc26xx_poll_out(const struct device *dev,
 					unsigned char c)
 {
-	UARTCharPut(get_dev_conf(dev)->regs, c);
+
+	uint32_t regs = get_dev_conf(dev)->regs;
+	
+	while (UARTBusy(regs) == true) {
+	}
+
+	UARTCharPut(regs, c);
 	/*
 	 * Need to wait for character to be transmitted to ensure cpu does not
 	 * enter standby when uart is busy
 	 */
-	while (UARTBusy(get_dev_conf(dev)->regs) == true) {
-	}
 }
 
 static int uart_cc13xx_cc26xx_err_check(const struct device *dev)
@@ -200,9 +206,10 @@ static int uart_cc13xx_cc26xx_fifo_fill(const struct device *dev,
 					int len)
 {
 	int n = 0;
+	uint32_t regs = get_dev_conf(dev)->regs;
 
 	while (n < len) {
-		if (!UARTCharPutNonBlocking(get_dev_conf(dev)->regs, buf[n])) {
+		if (!UARTCharPutNonBlocking(regs, buf[n])) {
 			break;
 		}
 		n++;
@@ -216,10 +223,10 @@ static int uart_cc13xx_cc26xx_fifo_read(const struct device *dev,
 					const int len)
 {
 	int c, n;
-
+	uint32_t regs = get_dev_conf(dev)->regs;
 	n = 0;
 	while (n < len) {
-		c = UARTCharGetNonBlocking(get_dev_conf(dev)->regs);
+		c = UARTCharGetNonBlocking(regs);
 		if (c == -1) {
 			break;
 		}
@@ -351,9 +358,14 @@ static void uart_cc13xx_cc26xx_irq_callback_set(const struct device *dev,
 static void uart_cc13xx_cc26xx_isr(const struct device *dev)
 {
 	struct uart_cc13xx_cc26xx_data *data = get_dev_data(dev);
-
 	if (data->callback) {
 		data->callback(dev, data->user_data);
+	}
+	else {
+		UARTIntClear(get_dev_conf(dev)->regs,
+			UART_INT_OE | UART_INT_BE | UART_INT_PE |
+			UART_INT_FE | UART_INT_RT | UART_INT_TX |
+			UART_INT_RX | UART_INT_CTS);
 	}
 }
 
