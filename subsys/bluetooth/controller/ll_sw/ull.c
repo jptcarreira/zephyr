@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Nordic Semiconductor ASA
+ * Copyright (c) 2017-2021 Nordic Semiconductor ASA
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -66,6 +66,22 @@
 #include "common/log.h"
 #include "hal/debug.h"
 
+/* When both central and peripheral are supported, one each Rx node will be
+ * needed by connectable advertising and the initiator to generate connection
+ * complete event, hence conditionally set the count.
+ */
+#if defined(CONFIG_BT_MAX_CONN)
+#if defined(CONFIG_BT_CENTRAL) && defined(CONFIG_BT_PERIPHERAL)
+#define BT_CTLR_MAX_CONNECTABLE 2
+#else
+#define BT_CTLR_MAX_CONNECTABLE 1
+#endif
+#define BT_CTLR_MAX_CONN        CONFIG_BT_MAX_CONN
+#else
+#define BT_CTLR_MAX_CONNECTABLE 0
+#define BT_CTLR_MAX_CONN        0
+#endif
+
 #if !defined(TICKER_USER_LLL_VENDOR_OPS)
 #define TICKER_USER_LLL_VENDOR_OPS 0
 #endif /* TICKER_USER_LLL_VENDOR_OPS */
@@ -82,13 +98,20 @@
 #if defined(CONFIG_BT_CTLR_LOW_LAT) && \
 	(CONFIG_BT_CTLR_LLL_PRIO == CONFIG_BT_CTLR_ULL_LOW_PRIO)
 #define TICKER_USER_LLL_OPS      (3 + TICKER_USER_LLL_VENDOR_OPS + 1)
-#else
+/* NOTE: When ticker job is disabled inside radio events then all advertising,
+ *       scanning, and slave latency cancel ticker operations will be deferred,
+ *       requiring increased ticker thread context operation queue count.
+ */
+#define TICKER_USER_THREAD_OPS   (BT_CTLR_ADV_SET + BT_CTLR_SCAN_SET + \
+				  BT_CTLR_MAX_CONN + \
+				  TICKER_USER_THREAD_VENDOR_OPS + 1)
+#else /* !CONFIG_BT_CTLR_LOW_LAT */
 #define TICKER_USER_LLL_OPS      (2 + TICKER_USER_LLL_VENDOR_OPS + 1)
-#endif /* CONFIG_BT_CTLR_LOW_LAT */
+#define TICKER_USER_THREAD_OPS   (1 + TICKER_USER_THREAD_VENDOR_OPS + 1)
+#endif /* !CONFIG_BT_CTLR_LOW_LAT */
 
 #define TICKER_USER_ULL_HIGH_OPS (3 + TICKER_USER_ULL_HIGH_VENDOR_OPS + 1)
 #define TICKER_USER_ULL_LOW_OPS  (1 + 1)
-#define TICKER_USER_THREAD_OPS   (1 + TICKER_USER_THREAD_VENDOR_OPS + 1)
 
 #if defined(CONFIG_BT_BROADCASTER)
 #define BT_ADV_TICKER_NODES ((TICKER_ID_ADV_LAST) - (TICKER_ID_ADV_STOP) + 1)
@@ -249,22 +272,6 @@ static MFIFO_DEFINE(pdu_rx_free, sizeof(void *), PDU_RX_CNT);
 			  PDU_DATA_SIZE),                     \
 		      PDU_RX_USER_PDU_OCTETS_MAX)              \
 	)
-
-/* When both central and peripheral are supported, one each Rx node will be
- * needed by connectable advertising and the initiator to generate connection
- * complete event, hence conditionally set the count.
- */
-#if defined(CONFIG_BT_MAX_CONN)
-#if defined(CONFIG_BT_CENTRAL) && defined(CONFIG_BT_PERIPHERAL)
-#define BT_CTLR_MAX_CONNECTABLE 2
-#else
-#define BT_CTLR_MAX_CONNECTABLE 1
-#endif
-#define BT_CTLR_MAX_CONN        CONFIG_BT_MAX_CONN
-#else
-#define BT_CTLR_MAX_CONNECTABLE 0
-#define BT_CTLR_MAX_CONN        0
-#endif
 
 #if defined(CONFIG_BT_PER_ADV_SYNC_MAX)
 #define BT_CTLR_SCAN_SYNC_SET CONFIG_BT_PER_ADV_SYNC_MAX
@@ -450,7 +457,7 @@ int ll_init(struct k_sem *sem_rx)
 	}
 #endif /* CONFIG_BT_CONN */
 
-#if IS_ENABLED(CONFIG_BT_CTLR_DF)
+#if defined(CONFIG_BT_CTLR_DF)
 	err = ull_df_init();
 	if (err) {
 		return err;
@@ -498,7 +505,7 @@ int ll_init(struct k_sem *sem_rx)
 	}
 #endif /* CONFIG_BT_CTLR_ADV_ISO */
 
-#if IS_ENABLED(CONFIG_BT_CTLR_DF)
+#if defined(CONFIG_BT_CTLR_DF)
 	err = lll_df_init();
 	if (err) {
 		return err;
@@ -589,7 +596,7 @@ void ll_reset(void)
 	LL_ASSERT(!err);
 #endif /* CONFIG_BT_CTLR_ADV_ISO */
 
-#if IS_ENABLED(CONFIG_BT_CTLR_DF)
+#if defined(CONFIG_BT_CTLR_DF)
 	err = ull_df_reset();
 	LL_ASSERT(!err);
 #endif
@@ -1756,7 +1763,7 @@ static void perform_lll_reset(void *param)
 	LL_ASSERT(!err);
 #endif /* CONFIG_BT_CONN */
 
-#if IS_ENABLED(CONFIG_BT_CTLR_DF)
+#if defined(CONFIG_BT_CTLR_DF)
 	err = lll_df_reset();
 	LL_ASSERT(!err);
 #endif /* CONFIG_BT_CTLR_DF */

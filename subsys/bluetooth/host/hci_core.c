@@ -6664,7 +6664,6 @@ static int set_sd(struct bt_le_ext_adv *adv, const struct bt_ad *sd,
 int bt_set_name(const char *name)
 {
 #if defined(CONFIG_BT_DEVICE_NAME_DYNAMIC)
-	struct bt_le_ext_adv *adv = bt_adv_lookup_legacy();
 	size_t len = strlen(name);
 	int err;
 
@@ -6678,15 +6677,6 @@ int bt_set_name(const char *name)
 
 	strncpy(bt_dev.name, name, len);
 	bt_dev.name[len] = '\0';
-
-	/* Update advertising name if in use */
-	if (adv && atomic_test_bit(adv->flags, BT_ADV_INCLUDE_NAME)) {
-		struct bt_data data[] = { BT_DATA(BT_DATA_NAME_COMPLETE, name,
-						len) };
-		struct bt_ad sd = { data, ARRAY_SIZE(data) };
-
-		set_sd(adv, &sd, 1);
-	}
 
 	if (IS_ENABLED(CONFIG_BT_SETTINGS)) {
 		err = settings_save_one("bt/name", bt_dev.name, len);
@@ -6726,10 +6716,14 @@ int bt_set_id_addr(const bt_addr_le_t *addr)
 
 void bt_id_get(bt_addr_le_t *addrs, size_t *count)
 {
-	size_t to_copy = MIN(*count, bt_dev.id_count);
+	if (addrs) {
+		size_t to_copy = MIN(*count, bt_dev.id_count);
 
-	memcpy(addrs, bt_dev.id_addr, to_copy * sizeof(bt_addr_le_t));
-	*count = to_copy;
+		memcpy(addrs, bt_dev.id_addr, to_copy * sizeof(bt_addr_le_t));
+		*count = to_copy;
+	} else {
+		*count = bt_dev.id_count;
+	}
 }
 
 static int id_find(const bt_addr_le_t *addr)

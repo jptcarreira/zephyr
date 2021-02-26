@@ -858,6 +858,13 @@ class DeviceHandler(Handler):
 
         self.instance.results = harness.tests
 
+        # sometimes a test instance hasn't been executed successfully with an
+        # empty dictionary results, in order to include it into final report,
+        # so fill the results as BLOCK
+        if self.instance.results == {}:
+            for k in self.instance.testcase.cases:
+                self.instance.results[k] = 'BLOCK'
+
         if harness.state:
             self.set_state(harness.state, handler_time)
             if  harness.state == "failed":
@@ -3473,7 +3480,7 @@ class TestSuite(DisablePyTestCollectionMixin):
                         classname = p + ":" + ".".join(instance.testcase.name.split(".")[:2])
 
                     # remove testcases that are being re-run from exiting reports
-                    for tc in eleTestsuite.findall(f'testcase/[@classname="{classname}"]'):
+                    for tc in eleTestsuite.findall(f'testcase/[@classname="{classname}"][@name="{instance.testcase.name}"]'):
                         eleTestsuite.remove(tc)
 
                     eleTestcase = ET.SubElement(eleTestsuite, 'testcase',

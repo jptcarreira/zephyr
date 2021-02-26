@@ -2432,8 +2432,8 @@ static void le_read_tx_power(struct net_buf *buf, struct net_buf **evt)
 	ll_tx_pwr_get(&rp->min_tx_power, &rp->max_tx_power);
 }
 
-#if IS_ENABLED(CONFIG_BT_CTLR_DF)
-#if IS_ENABLED(CONFIG_BT_CTLR_DF_ADV_CTE_TX)
+#if defined(CONFIG_BT_CTLR_DF)
+#if defined(CONFIG_BT_CTLR_DF_ADV_CTE_TX)
 static void le_df_set_cl_cte_tx_params(struct net_buf *buf,
 				       struct net_buf **evt)
 {
@@ -2481,7 +2481,7 @@ static void le_df_set_cl_cte_enable(struct net_buf *buf, struct net_buf **evt)
 }
 #endif /* CONFIG_BT_CTLR_DF_ADV_CTE_TX */
 
-#if IS_ENABLED(CONFIG_BT_CTLR_DF_CONN_CTE_RSP)
+#if defined(CONFIG_BT_CTLR_DF_CONN_CTE_RSP)
 static void le_df_set_conn_cte_tx_params(struct net_buf *buf,
 					 struct net_buf **evt)
 {
@@ -3594,8 +3594,8 @@ static int controller_cmd_handle(uint16_t  ocf, struct net_buf *cmd,
 		le_read_tx_power(cmd, evt);
 		break;
 
-#if IS_ENABLED(CONFIG_BT_CTLR_DF)
-#if IS_ENABLED(CONFIG_BT_CTLR_DF_ADV_CTE_TX)
+#if defined(CONFIG_BT_CTLR_DF)
+#if defined(CONFIG_BT_CTLR_DF_ADV_CTE_TX)
 	case BT_OCF(BT_HCI_OP_LE_SET_CL_CTE_TX_PARAMS):
 		le_df_set_cl_cte_tx_params(cmd, evt);
 		break;
@@ -3606,7 +3606,7 @@ static int controller_cmd_handle(uint16_t  ocf, struct net_buf *cmd,
 	case BT_OCF(BT_HCI_OP_LE_READ_ANT_INFO):
 		le_df_read_ant_inf(cmd, evt);
 		break;
-#if IS_ENABLED(CONFIG_BT_CTLR_DF_CONN_CTE_RSP)
+#if defined(CONFIG_BT_CTLR_DF_CONN_CTE_RSP)
 	case BT_OCF(BT_HCI_OP_LE_SET_CONN_CTE_TX_PARAMS):
 		le_df_set_conn_cte_tx_params(cmd, evt);
 		break;
@@ -4683,6 +4683,7 @@ static void le_ext_adv_report(struct pdu_data *pdu_data,
 		struct pdu_adv_ext_hdr *h;
 		uint8_t sec_phy_curr = 0U;
 		uint8_t evt_type_curr;
+		uint8_t hdr_buf_len;
 		uint8_t hdr_len;
 		uint8_t *ptr;
 
@@ -4707,8 +4708,7 @@ static void le_ext_adv_report(struct pdu_data *pdu_data,
 		evt_type_curr = p->adv_mode;
 
 		if (!p->ext_hdr_len) {
-			hdr_len = offsetof(struct pdu_adv_com_ext_adv,
-					   ext_hdr_adv_data);
+			hdr_len = PDU_AC_EXT_HEADER_SIZE_MIN;
 
 			goto no_ext_hdr;
 		}
@@ -4798,24 +4798,18 @@ static void le_ext_adv_report(struct pdu_data *pdu_data,
 		}
 
 		hdr_len = ptr - (uint8_t *)p;
-		if (hdr_len <= (offsetof(struct pdu_adv_com_ext_adv,
-					 ext_hdr_adv_data) +
+		if (hdr_len <= (PDU_AC_EXT_HEADER_SIZE_MIN +
 				sizeof(struct pdu_adv_ext_hdr))) {
-			hdr_len = offsetof(struct pdu_adv_com_ext_adv,
-					   ext_hdr_adv_data);
+			hdr_len = PDU_AC_EXT_HEADER_SIZE_MIN;
 			ptr = (uint8_t *)h;
 		}
 
-		if (hdr_len > (p->ext_hdr_len +
-			       offsetof(struct pdu_adv_com_ext_adv,
-					ext_hdr_adv_data))) {
+		hdr_buf_len = PDU_AC_EXT_HEADER_SIZE_MIN + p->ext_hdr_len;
+		if (hdr_len > hdr_buf_len) {
 			BT_WARN("    Header length %u/%u, INVALID.", hdr_len,
 				p->ext_hdr_len);
 		} else {
-			uint8_t acad_len = p->ext_hdr_len +
-					   offsetof(struct pdu_adv_com_ext_adv,
-						    ext_hdr_adv_data) -
-					   hdr_len;
+			uint8_t acad_len = hdr_buf_len - hdr_len;
 
 			if (acad_len) {
 				ptr += acad_len;
@@ -5104,6 +5098,7 @@ static void le_per_adv_sync_report(struct pdu_data *pdu_data,
 		uint8_t *data_curr = NULL;
 		uint8_t sec_phy_curr = 0U;
 		struct pdu_adv_ext_hdr *h;
+		uint8_t hdr_buf_len;
 		uint8_t hdr_len;
 		uint8_t *ptr;
 
@@ -5167,24 +5162,18 @@ static void le_per_adv_sync_report(struct pdu_data *pdu_data,
 		}
 
 		hdr_len = ptr - (uint8_t *)p;
-		if (hdr_len <= (offsetof(struct pdu_adv_com_ext_adv,
-					 ext_hdr_adv_data) +
+		if (hdr_len <= (PDU_AC_EXT_HEADER_SIZE_MIN +
 				sizeof(struct pdu_adv_ext_hdr))) {
-			hdr_len = offsetof(struct pdu_adv_com_ext_adv,
-					   ext_hdr_adv_data);
+			hdr_len = PDU_AC_EXT_HEADER_SIZE_MIN;
 			ptr = (uint8_t *)h;
 		}
 
-		if (hdr_len > (p->ext_hdr_len +
-			       offsetof(struct pdu_adv_com_ext_adv,
-					ext_hdr_adv_data))) {
+		hdr_buf_len = PDU_AC_EXT_HEADER_SIZE_MIN + p->ext_hdr_len;
+		if (hdr_len > hdr_buf_len) {
 			BT_WARN("    Header length %u/%u, INVALID.", hdr_len,
 				p->ext_hdr_len);
 		} else {
-			uint8_t acad_len = p->ext_hdr_len +
-					   offsetof(struct pdu_adv_com_ext_adv,
-						    ext_hdr_adv_data) -
-					   hdr_len;
+			uint8_t acad_len = hdr_buf_len - hdr_len;
 
 			if (acad_len) {
 				ptr += acad_len;

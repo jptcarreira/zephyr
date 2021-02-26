@@ -62,6 +62,7 @@ config X86
 	select ARCH_HAS_TIMING_FUNCTIONS
 	select ARCH_HAS_THREAD_LOCAL_STORAGE
 	select ARCH_HAS_DEMAND_PAGING
+	select CAN_LINK_IN_VIRT
 	help
 	  x86 architecture
 
@@ -608,7 +609,7 @@ config KERNEL_VM_OFFSET
 	  in page tables, the equation:
 
 	      virt = phys + ((KERNEL_VM_BASE + KERNEL_VM_OFFSET) -
-	                     SRAM_BASE_ADDRESS)
+	                     (SRAM_BASE_ADDRESS + SRAM_OFFSET))
 
 	  Will be used to convert between physical and virtual addresses for
 	  memory that is mapped at boot.

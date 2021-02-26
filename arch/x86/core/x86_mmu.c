@@ -1598,7 +1598,7 @@ void arch_mem_domain_thread_remove(struct k_thread *thread)
 	if ((thread->base.thread_state & _THREAD_DEAD) == 0) {
 		/* Thread is migrating to another memory domain and not
 		 * exiting for good; we weren't called from
-		 * z_thread_single_abort().  Resetting the stack region will
+		 * z_thread_abort().  Resetting the stack region will
 		 * take place in the forthcoming thread_add() call.
 		 */
 		return;
@@ -1723,17 +1723,21 @@ static void mark_addr_page_reserved(uintptr_t addr, size_t len)
 	}
 }
 
-/* Selected on PC-like targets at the SOC level.
- *
- * Best is to do some E820 or similar enumeration to specifically identify
- * all page frames which are reserved by the hardware or firmware.
- *
- * For now, just reserve everything in the first megabyte of physical memory.
- */
 void arch_reserved_pages_update(void)
 {
+#ifdef CONFIG_X86_PC_COMPATIBLE
+	/*
+	 * Best is to do some E820 or similar enumeration to specifically
+	 * identify all page frames which are reserved by the hardware or
+	 * firmware. Or use x86_memmap[] with Multiboot if available.
+	 *
+	 * But still, reserve everything in the first megabyte of physical
+	 * memory on PC-compatible platforms.
+	 */
 	mark_addr_page_reserved(0, MB(1));
+#endif /* CONFIG_X86_PC_COMPATIBLE */
 
+#ifdef CONFIG_X86_MEMMAP
 	for (int i = 0; i < CONFIG_X86_MEMMAP_ENTRIES; i++) {
 		struct x86_memmap_entry *entry = &x86_memmap[i];
 
@@ -1755,6 +1759,7 @@ void arch_reserved_pages_update(void)
 
 		mark_addr_page_reserved(entry->base, entry->length);
 	}
+#endif /* CONFIG_X86_MEMMAP */
 }
 #endif /* CONFIG_ARCH_HAS_RESERVED_PAGE_FRAMES */
 

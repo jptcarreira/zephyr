@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Nordic Semiconductor ASA
+ * Copyright (c) 2018-2021 Nordic Semiconductor ASA
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -35,6 +35,16 @@
 #define XON_BITMASK BIT(31) /* XTAL has been retained from previous prepare */
 #endif /* CONFIG_BT_CTLR_XTAL_ADVANCED */
 
+#if defined(CONFIG_BT_BROADCASTER)
+#if defined(CONFIG_BT_CTLR_ADV_SET)
+#define BT_CTLR_ADV_SET CONFIG_BT_CTLR_ADV_SET
+#else /* CONFIG_BT_CTLR_ADV_SET */
+#define BT_CTLR_ADV_SET 1
+#endif /* CONFIG_BT_CTLR_ADV_SET */
+#else /* !CONFIG_BT_BROADCASTER */
+#define BT_CTLR_ADV_SET 0
+#endif /* !CONFIG_BT_BROADCASTER */
+
 #if defined(CONFIG_BT_OBSERVER)
 #if defined(CONFIG_BT_CTLR_ADV_EXT)
 #if defined(CONFIG_BT_CTLR_PHY_CODED)
@@ -45,7 +55,9 @@
 #else /* !CONFIG_BT_CTLR_ADV_EXT */
 #define BT_CTLR_SCAN_SET 1
 #endif /* !CONFIG_BT_CTLR_ADV_EXT */
-#endif /* CONFIG_BT_OBSERVER */
+#else /* !CONFIG_BT_OBSERVER */
+#define BT_CTLR_SCAN_SET 0
+#endif /* !CONFIG_BT_OBSERVER */
 
 enum {
 	TICKER_ID_LLL_PREEMPT = 0,
@@ -54,8 +66,7 @@ enum {
 	TICKER_ID_ADV_STOP,
 	TICKER_ID_ADV_BASE,
 #if defined(CONFIG_BT_CTLR_ADV_EXT) || defined(CONFIG_BT_HCI_MESH_EXT)
-	TICKER_ID_ADV_LAST = ((TICKER_ID_ADV_BASE) +
-			      (CONFIG_BT_CTLR_ADV_SET) - 1),
+	TICKER_ID_ADV_LAST = ((TICKER_ID_ADV_BASE) + (BT_CTLR_ADV_SET) - 1),
 #if defined(CONFIG_BT_CTLR_ADV_EXT)
 #if (CONFIG_BT_CTLR_ADV_AUX_SET > 0)
 	TICKER_ID_ADV_AUX_BASE,

@@ -43,7 +43,7 @@
 /soc/arm/nxp*/                            @MaureenHelm
 /soc/arm/nordic_nrf/                      @ioannisg
 /soc/arm/nuvoton/                         @ssekar15
-/soc/arm/nuvoton_npcx/                    @MulinChao
+/soc/arm/nuvoton_npcx/                    @MulinChao @WealianLiao @ChiHuaL
 /soc/arm/qemu_cortex_a53/                 @carlocaione
 /soc/arm/quicklogic_eos_s3/               @kowalewskijan @kgugala
 /soc/arm/silabs_exx32/efm32pg1b/          @rdmeneze
@@ -79,6 +79,7 @@
 /boards/arm/96b_stm32_sensor_mez/         @Mani-Sadhasivam
 /boards/arm/96b_wistrio/                  @Mani-Sadhasivam
 /boards/arm/arduino_due/                  @ioannisg
+/boards/arm/bmd_345_eval/                 @Navin-Sankar
 /boards/arm/cc1352r1_launchxl/            @bwitherspoon
 /boards/arm/cc26x2r1_launchxl/            @bwitherspoon
 /boards/arm/cc3220sf_launchxl/            @vanti
@@ -99,7 +100,7 @@
 /boards/arm/mimxrt*/doc/                  @MaureenHelm @MeganHansen
 /boards/arm/mps2_an385/                   @fvincenzo
 /boards/arm/msp_exp432p401r_launchxl/     @Mani-Sadhasivam
-/boards/arm/npcx7m6fb_evb/                @MulinChao
+/boards/arm/npcx7m6fb_evb/                @MulinChao @WealianLiao @ChiHuaL
 /boards/arm/nrf*/                         @carlescufi @lemrey @ioannisg
 /boards/arm/nucleo*/                      @erwango @ABOSTM @FRASTM
 /boards/arm/nucleo_f401re/                @idlethread
@@ -164,7 +165,7 @@
 /drivers/*/*stm32*                        @erwango @ABOSTM @FRASTM
 /drivers/*/*native_posix*                 @aescolar @daor-oti
 /drivers/*/*lpc11u6x*                     @mbittan @simonguinot
-/drivers/*/*npcx*                         @MulinChao
+/drivers/*/*npcx*                         @MulinChao @WealianLiao @ChiHuaL
 /drivers/adc/                             @anangl
 /drivers/adc/adc_stm32.c                  @cybertale
 /drivers/bluetooth/                       @joerchan @jhedberg @Vudentz
@@ -215,6 +216,8 @@
 /drivers/i2c/Kconfig.i2c_emul             @sjg20
 /drivers/i2c/Kconfig.it8xxx2              @GTLin08
 /drivers/i2c/slave/*eeprom*               @henrikbrixandersen
+/drivers/i2c/Kconfig.test                 @mbolivar-nordic
+/drivers/i2c/i2c_test.c                   @mbolivar-nordic
 /drivers/i2s/*litex*                      @mateusz-holenko @kgugala @pgielda
 /drivers/ieee802154/                      @jukkar @tbursztyka
 /drivers/ieee802154/ieee802154_rf2xx*     @jukkar @tbursztyka @nandojve
@@ -299,6 +302,7 @@
 /drivers/watchdog/*gecko*                 @oanerer
 /drivers/watchdog/*sifive*                @katsuster
 /drivers/watchdog/wdt_handlers.c          @dcpleung @nashif
+/drivers/watchdog/*cc32xx*                @pavlohamov
 /drivers/wifi/                            @jukkar @tbursztyka @pfalcon
 /drivers/wifi/esp/                        @mniestroj
 /drivers/wifi/eswifi/                     @loicpoulain @nandojve
@@ -322,7 +326,7 @@
 /dts/arm/ti/cc3235*                       @vanti
 /dts/arm/nordic/                          @ioannisg @carlescufi
 /dts/arm/nuvoton/                         @ssekar15
-/dts/arm/nuvoton/npcx/                    @MulinChao
+/dts/arm/nuvoton/npcx/                    @MulinChao @WealianLiao @ChiHuaL
 /dts/arm/nxp/                             @MaureenHelm
 /dts/arm/microchip/                       @franciscomunoz @albertofloyd @scottwcpg
 /dts/arm/silabs/efm32_pg_1b.dtsi          @rdmeneze
@@ -352,7 +356,7 @@
 /dts/bindings/modem/*hl7800.yaml          @rerickson1
 /dts/bindings/serial/ns16550.yaml         @dcpleung @nashif
 /dts/bindings/wifi/*esp.yaml              @mniestroj
-/dts/bindings/*/*npcx*                    @MulinChao
+/dts/bindings/*/*npcx*                    @MulinChao @WealianLiao @ChiHuaL
 /dts/bindings/*/nordic*                   @anangl
 /dts/bindings/*/nxp*                      @MaureenHelm
 /dts/bindings/*/openisa*                  @MaureenHelm
@@ -503,6 +507,7 @@
 /scripts/pylib/twister/expr_parser.py     @nashif
 /scripts/schemas/twister/                 @nashif
 /scripts/gen_app_partitions.py            @dcpleung @nashif
+/scripts/gen_handles.py                   @pabigot
 /scripts/get_maintainer.py                @nashif
 /scripts/dts/                             @mbolivar-nordic @galak
 /scripts/release/                         @nashif
@@ -525,6 +530,7 @@
 /scripts/west_commands/                   @mbolivar-nordic
 /scripts/west-commands.yml                @mbolivar-nordic
 /scripts/zephyr_module.py                 @tejlmand
+/scripts/uf2conv.py                       @petejohanson
 /scripts/user_wordsize.py                 @cfriedt
 /scripts/valgrind.supp                    @aescolar @daor-oti
 /share/zephyr-package/                    @tejlmand

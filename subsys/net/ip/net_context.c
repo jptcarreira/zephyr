@@ -269,6 +269,9 @@ int net_context_get(sa_family_t family,
 #if defined(CONFIG_NET_CONTEXT_RCVTIMEO)
 		contexts[i].options.rcvtimeo = K_FOREVER;
 #endif
+#if defined(CONFIG_NET_CONTEXT_SNDTIMEO)
+		contexts[i].options.sndtimeo = K_FOREVER;
+#endif
 
 		if (IS_ENABLED(CONFIG_NET_IPV6) ||
 		    IS_ENABLED(CONFIG_NET_IPV4)) {
@@ -1235,6 +1238,22 @@ static int get_context_rcvtimeo(struct net_context *context,
 #endif
 }
 
+static int get_context_sndtimeo(struct net_context *context,
+				void *value, size_t *len)
+{
+#if defined(CONFIG_NET_CONTEXT_SNDTIMEO)
+	*((k_timeout_t *)value) = context->options.sndtimeo;
+
+	if (len) {
+		*len = sizeof(k_timeout_t);
+	}
+
+	return 0;
+#else
+	return -ENOTSUP;
+#endif
+}
+
 /* If buf is not NULL, then use it. Otherwise read the data to be written
  * to net_pkt from msghdr.
  */
@@ -1397,6 +1416,7 @@ static int context_sendto(struct net_context *context,
 			  bool sendto)
 {
 	const struct msghdr *msghdr = NULL;
+	struct net_if *iface;
 	struct net_pkt *pkt;
 	size_t tmp_len;
 	int ret;
@@ -1471,7 +1491,6 @@ static int context_sendto(struct net_context *context,
 	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) &&
 		   net_context_get_family(context) == AF_PACKET) {
 		struct sockaddr_ll *ll_addr = (struct sockaddr_ll *)dst_addr;
-		struct net_if *iface;
 
 		if (msghdr) {
 			ll_addr = msghdr->msg_name;
@@ -1520,7 +1539,6 @@ static int context_sendto(struct net_context *context,
 	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_CAN) &&
 		   net_context_get_family(context) == AF_CAN) {
 		struct sockaddr_can *can_addr = (struct sockaddr_can *)dst_addr;
-		struct net_if *iface;
 
 		if (msghdr) {
 			can_addr = msghdr->msg_name;
@@ -1569,6 +1587,11 @@ static int context_sendto(struct net_context *context,
 		for (i = 0; i < msghdr->msg_iovlen; i++) {
 			len += msghdr->msg_iov[i].iov_len;
 		}
+	}
+
+	iface = net_context_get_iface(context);
+	if (iface && !net_if_is_up(iface)) {
+		return -ENETDOWN;
 	}
 
 	pkt = context_alloc_pkt(context, len, PKT_WAIT_TIME);
@@ -2186,6 +2209,22 @@ static int set_context_rcvtimeo(struct net_context *context,
 #endif
 }
 
+static int set_context_sndtimeo(struct net_context *context,
+				const void *value, size_t len)
+{
+#if defined(CONFIG_NET_CONTEXT_SNDTIMEO)
+	if (len != sizeof(k_timeout_t)) {
+		return -EINVAL;
+	}
+
+	context->options.sndtimeo = *((k_timeout_t *)value);
+
+	return 0;
+#else
+	return -ENOTSUP;
+#endif
+}
+
 int net_context_set_option(struct net_context *context,
 			   enum net_context_option option,
 			   const void *value, size_t len)
@@ -2215,6 +2254,9 @@ int net_context_set_option(struct net_context *context,
 		break;
 	case NET_OPT_RCVTIMEO:
 		ret = set_context_rcvtimeo(context, value, len);
+		break;
+	case NET_OPT_SNDTIMEO:
+		ret = set_context_sndtimeo(context, value, len);
 		break;
 	}
 
@@ -2252,6 +2294,9 @@ int net_context_get_option(struct net_context *context,
 		break;
 	case NET_OPT_RCVTIMEO:
 		ret = get_context_rcvtimeo(context, value, len);
+		break;
+	case NET_OPT_SNDTIMEO:
+		ret = get_context_sndtimeo(context, value, len);
 		break;
 	}
 

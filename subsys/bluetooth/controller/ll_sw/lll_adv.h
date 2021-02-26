@@ -1,19 +1,14 @@
 /*
- * Copyright (c) 2017-2019 Nordic Semiconductor ASA
+ * Copyright (c) 2017-2021 Nordic Semiconductor ASA
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-
-#if defined(CONFIG_BT_CTLR_ADV_SET)
-#define BT_CTLR_ADV_SET CONFIG_BT_CTLR_ADV_SET
-#else /* CONFIG_BT_CTLR_ADV_SET */
-#define BT_CTLR_ADV_SET 1
-#endif /* CONFIG_BT_CTLR_ADV_SET */
 
 #include "lll_adv_pdu.h"
 
 struct lll_adv_iso {
 	struct lll_hdr hdr;
+	struct lll_adv *adv;
 };
 
 struct lll_adv_sync {
@@ -36,10 +31,10 @@ struct lll_adv_sync {
 	struct lll_adv_pdu data;
 
 #if defined(CONFIG_BT_CTLR_ADV_ISO)
-	struct lll_adv_iso *adv_iso;
+	struct lll_adv_iso *iso;
 #endif /* CONFIG_BT_CTLR_ADV_ISO */
 
-#if IS_ENABLED(CONFIG_BT_CTLR_DF_ADV_CTE_TX)
+#if defined(CONFIG_BT_CTLR_DF_ADV_CTE_TX)
 	/* This flag is used only by LLL. It holds information if CTE
 	 * transmission was started by LLL.
 	 */
